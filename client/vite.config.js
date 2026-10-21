@@ -51,6 +51,8 @@ export default defineConfig({
         short_name: 'HMS',
         description: 'Digital hostel management system',
         theme_color: '#2563eb',
+        start_url: '/',
+        scope: '/',
         icons: [
           {
             src: '/icon-192x192.png',

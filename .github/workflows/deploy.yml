@@ -42,7 +42,7 @@ jobs:
       - name: Build frontend
         working-directory: client
         env:
-          VITE_API_URL: /api
+          VITE_API_URL: https://hostel-backend.pydah.edu.in
           VITE_CRM_URL: https://crm.pydah.edu.in
         run: |
           npm run build
