@@ -140,7 +140,7 @@ jobs:
           echo "==> Reloading PM2 process via ecosystem file..."
           cd "${PROJECT_DIR}/server"
           mkdir -p logs
-          pm2 startOrReload ecosystem.config.js --update-env
+          pm2 startOrReload ecosystem.config.cjs --update-env
 
           echo "==> Saving PM2 process list..."
           pm2 save
