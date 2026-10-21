@@ -1,0 +1,2503 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import api from '../../utils/axios';
+import toast from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  PlusIcon,
+  PencilIcon,
+  TrashIcon,
+  UserGroupIcon,
+  BuildingOfficeIcon,
+  XMarkIcon,
+  FunnelIcon,
+  UserIcon,
+  AcademicCapIcon,
+  PhoneIcon,
+  TableCellsIcon,
+  Squares2X2Icon,
+  LockClosedIcon,
+  ChartBarIcon
+} from '@heroicons/react/24/outline';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import SEO from '../../components/SEO';
+import axios from 'axios';
+import { useAuth } from '../../context/AuthContext';
+import { hasFullAccess, canPerformAction } from '../../utils/permissionUtils';
+
+const RoomManagement = () => {
+
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
+  const canAddRoom = isSuperAdmin || canPerformAction(user, 'room_management', 'create');
+  const canEditRoom = isSuperAdmin || canPerformAction(user, 'room_management', 'edit');
+  const canDeleteRoom = isSuperAdmin || canPerformAction(user, 'room_management', 'delete');
+  const canManageBills = isSuperAdmin || canPerformAction(user, 'room_management', 'edit');
+
+  console.log('🔐 Room Management Permissions:', {
+    user: user?.username,
+    role: user?.role,
+    isSuperAdmin,
+    canAddRoom,
+    canEditRoom,
+    canDeleteRoom,
+    canManageBills,
+    permissions: user?.permissions,
+    accessLevels: user?.permissionAccessLevels
+  });
+
+  const [rooms, setRooms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addTab, setAddTab] = useState('room'); // 'hostel' | 'category' | 'room'
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showStudentModal, setShowStudentModal] = useState(false);
+  const [roomModalTab, setRoomModalTab] = useState('occupants');
+  const [occupancyHistory, setOccupancyHistory] = useState([]);
+  const [historyAcademicYears, setHistoryAcademicYears] = useState([]);
+  const [historyFilterAY, setHistoryFilterAY] = useState('');
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [roomStudents, setRoomStudents] = useState([]);
+  const [roomStaff, setRoomStaff] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const getDefaultAcademicYear = () => {
+    const year = new Date().getFullYear();
+    return `${year}-${year + 1}`;
+  };
+
+  const generateAcademicYears = () => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let i = -3; i <= 3; i++) {
+      const year = currentYear + i;
+      years.push(`${year}-${year + 1}`);
+    }
+    return years;
+  };
+
+  const [filters, setFilters] = useState({
+    hostel: '',
+    category: '',
+    academicYear: getDefaultAcademicYear()
+  });
+  // Live = active requests across all AYs; AY Wise = all statuses for selected year
+  const [analyticsMode, setAnalyticsMode] = useState('live');
+  const [formData, setFormData] = useState({
+    hostel: '',
+    category: '',
+    roomNumber: '',
+    bedCount: 1,
+    meterType: 'single'
+  });
+  const [hostelForm, setHostelForm] = useState({ name: '', code: '', description: '' });
+  const [categoryForm, setCategoryForm] = useState({ hostel: '', name: '', description: '' });
+  const [hostels, setHostels] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [showBillModal, setShowBillModal] = useState(false);
+  const [billForm, setBillForm] = useState({ month: '', startUnits: '', endUnits: '', rate: '' });
+  const [billHistory, setBillHistory] = useState([]);
+  const [billLoading, setBillLoading] = useState(false);
+  const [showEditBillModal, setShowEditBillModal] = useState(false);
+  const [editBillForm, setEditBillForm] = useState({ month: '', startUnits: '', endUnits: '', rate: '' });
+  const [showBillPreviewModal, setShowBillPreviewModal] = useState(false);
+  const [billPreview, setBillPreview] = useState(null);
+  const [showEditBillPreviewModal, setShowEditBillPreviewModal] = useState(false);
+  const [editBillPreview, setEditBillPreview] = useState(null);
+  const [realTimePreview, setRealTimePreview] = useState(null);
+  const [editRealTimePreview, setEditRealTimePreview] = useState(null);
+  const [roomStats, setRoomStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  const getCategoriesForHostel = (hostelId) => {
+    if (!hostelId) return [];
+    return categories.filter(c => (c.hostel?._id || c.hostel) === hostelId);
+  };
+
+  const fetchHostels = async () => {
+    try {
+      const res = await api.get('/api/hostels');
+      if (res.data.success) {
+        setHostels(res.data.data || []);
+      }
+    } catch (error) {
+      console.error('🏠 Error fetching hostels:', error);
+      toast.error('Failed to fetch hostels');
+    }
+  };
+
+  const fetchCategoriesByHostel = async (hostelId) => {
+    if (!hostelId) {
+      setCategories([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/api/hostels/${hostelId}/categories`);
+      if (res.data.success) {
+        setCategories(res.data.data || []);
+      }
+    } catch (error) {
+      console.error('🏠 Error fetching categories:', error);
+      toast.error('Failed to fetch categories');
+    }
+  };
+
+  const fetchRooms = async () => {
+    try {
+      const params = {
+        hostel: filters.hostel,
+        category: filters.category
+      };
+      if (analyticsMode === 'ay' && filters.academicYear) {
+        params.academicYear = filters.academicYear;
+      }
+      const response = await api.get('/api/admin/rooms', { params });
+      if (response.data.success) {
+        const fetchedRooms = response.data.data.rooms || [];
+        setRooms(fetchedRooms);
+
+
+
+      } else {
+        throw new Error('Failed to fetch rooms');
+      }
+    } catch (error) {
+      console.error('🏠 Error fetching rooms:', error);
+      console.error('🏠 Error details:', error.response?.data);
+      toast.error('Failed to fetch rooms');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchRoomStats = async () => {
+    setStatsLoading(true);
+    try {
+      const params = {};
+      if (analyticsMode === 'ay' && filters.academicYear) {
+        params.academicYear = filters.academicYear;
+      }
+      const response = await api.get('/api/admin/rooms/stats', { params });
+      if (response.data.success) {
+        setRoomStats(response.data.data);
+      } else {
+        throw new Error('Failed to fetch room stats');
+      }
+    } catch (error) {
+      console.error('📊 Error fetching room stats:', error);
+      toast.error('Failed to fetch room statistics');
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+
+
+  useEffect(() => {
+    fetchHostels();
+  }, []);
+
+  useEffect(() => {
+    setStatsLoading(true);
+    fetchRooms();
+    fetchRoomStats();
+  }, [filters, analyticsMode]);
+
+  useEffect(() => {
+    if (showBillModal) {
+      calculateRealTimePreview();
+    }
+  }, [billForm, showBillModal]);
+
+  // Initialize edit real-time preview when edit modal opens
+  useEffect(() => {
+    if (showEditBillModal && editBillForm.month) {
+      calculateEditRealTimePreview();
+    } else {
+      setEditRealTimePreview(null);
+    }
+  }, [showEditBillModal, editBillForm]);
+
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'bedCount' ? Number(value) : value
+    }));
+    if (name === 'hostel') {
+      fetchCategoriesByHostel(value);
+      setFormData(prev => ({ ...prev, category: '' }));
+    }
+  };
+
+  const handleHostelFormChange = (e) => {
+    const { name, value } = e.target;
+    setHostelForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleCategoryFormChange = (e) => {
+    const { name, value } = e.target;
+    setCategoryForm(prev => ({ ...prev, [name]: value }));
+    if (name === 'hostel') {
+      fetchCategoriesByHostel(value);
+    }
+  };
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'academicYear' || name === 'hostel' || name === 'category') {
+      setStatsLoading(true);
+    }
+    setFilters(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    if (name === 'hostel') {
+      fetchCategoriesByHostel(value);
+      setFilters(prev => ({ ...prev, category: '' }));
+    }
+  };
+
+  const handleAddRoom = async (e) => {
+    e.preventDefault();
+
+    if (!canAddRoom) {
+      toast.error('You do not have permission to add rooms');
+      return;
+    }
+
+    try {
+      await api.post('/api/admin/rooms', formData);
+      toast.success('Room added successfully');
+      setShowAddModal(false);
+      setFormData({ hostel: '', category: '', roomNumber: '', bedCount: 1, meterType: 'single' });
+      fetchRooms();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to add room');
+    }
+  };
+
+  const handleCreateHostelSubmit = async (e) => {
+    e.preventDefault();
+    if (!hostelForm.name.trim()) {
+      toast.error('Hostel name is required');
+      return;
+    }
+    if (!hostelForm.code.trim()) {
+      toast.error('Hostel code is required for sequence generation');
+      return;
+    }
+    try {
+      const res = await api.post('/api/hostels', {
+        name: hostelForm.name.trim(),
+        code: hostelForm.code.trim().toUpperCase(),
+        description: hostelForm.description
+      });
+      if (res.data.success) {
+        toast.success('Hostel created');
+        await fetchHostels();
+        setHostelForm({ name: '', code: '', description: '' });
+        setFormData(prev => ({ ...prev, hostel: res.data.data._id, category: '' }));
+        setCategoryForm(prev => ({ ...prev, hostel: res.data.data._id }));
+        fetchCategoriesByHostel(res.data.data._id);
+        setAddTab('category');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to create hostel');
+    }
+  };
+
+  const handleCreateCategorySubmit = async (e) => {
+    e.preventDefault();
+    if (!categoryForm.hostel) {
+      toast.error('Select a hostel');
+      return;
+    }
+    if (!categoryForm.name.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+    try {
+      const res = await api.post(`/api/hostels/${categoryForm.hostel}/categories`, { name: categoryForm.name.trim(), description: categoryForm.description });
+      if (res.data.success) {
+        toast.success('Category created');
+        await fetchCategoriesByHostel(categoryForm.hostel);
+        setCategoryForm({ hostel: categoryForm.hostel, name: '', description: '' });
+        setFormData(prev => ({ ...prev, hostel: categoryForm.hostel, category: res.data.data._id }));
+        setAddTab('room');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to create category');
+    }
+  };
+
+  const handleEditRoom = async (e) => {
+    e.preventDefault();
+
+    if (!canEditRoom) {
+      toast.error('You do not have permission to edit rooms');
+      return;
+    }
+
+    try {
+      await api.put(`/api/admin/rooms/${selectedRoom._id}`, formData);
+      toast.success('Room updated successfully');
+      setShowEditModal(false);
+      setSelectedRoom(null);
+      setFormData({ hostel: '', category: '', roomNumber: '', bedCount: 1, meterType: 'single' });
+      fetchRooms();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update room');
+    }
+  };
+
+  const handleDeleteRoom = async (roomId) => {
+    if (!canDeleteRoom) {
+      toast.error('You do not have permission to delete rooms');
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to delete this room?')) return;
+
+    try {
+      await api.delete(`/api/admin/rooms/${roomId}`);
+      toast.success('Room deleted successfully');
+      fetchRooms();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to delete room');
+    }
+  };
+
+  const openEditModal = (room) => {
+    setSelectedRoom(room);
+    setFormData({
+      hostel: room.hostel?._id || room.hostel,
+      category: room.category?._id || room.category,
+      roomNumber: room.roomNumber,
+      bedCount: room.bedCount || 1,
+      meterType: room.meterType || 'single'
+    });
+    fetchCategoriesByHostel(room.hostel?._id || room.hostel);
+    setShowEditModal(true);
+  };
+
+  const handleCreateHostel = () => {
+    setShowEditModal(false);
+    setAddTab('hostel');
+    setShowAddModal(true);
+  };
+
+  const handleCreateCategory = () => {
+    setShowEditModal(false);
+    setAddTab('category');
+    setCategoryForm(prev => ({ ...prev, hostel: formData.hostel }));
+    setShowAddModal(true);
+  };
+
+
+  // Filter rooms based on selected filters
+  const filteredRooms = rooms.filter(room => {
+    if (filters.hostel && (room.hostel?._id || room.hostel) !== filters.hostel) return false;
+    if (filters.category && (room.category?._id || room.category) !== filters.category) return false;
+    return true;
+  });
+
+  // Group rooms by hostel and category
+  const groupedRooms = filteredRooms.reduce((acc, room) => {
+    const hostelName = room.hostel?.name || 'Unassigned Hostel';
+    const categoryName = room.category?.name || 'Uncategorized';
+    const key = `${hostelName}||${categoryName}`;
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(room);
+    return acc;
+  }, {});
+
+  const handleRoomClick = async (room) => {
+    setSelectedRoom(room);
+    setRoomModalTab('occupants');
+    setOccupancyHistory([]);
+    setHistoryAcademicYears([]);
+    setHistoryFilterAY(filters.academicYear || '');
+    setLoadingStudents(true);
+    try {
+      const params =
+        analyticsMode === 'ay' && filters.academicYear
+          ? { academicYear: filters.academicYear }
+          : {};
+      const response = await api.get(`/api/admin/rooms/${room._id}/students`, { params });
+      if (response.data.success) {
+        setRoomStudents(response.data.data.students || []);
+        setRoomStaff(response.data.data.staff || []);
+      } else {
+        throw new Error('Failed to fetch room occupants');
+      }
+    } catch (error) {
+      console.error('Error fetching room occupants:', error);
+      toast.error('Failed to fetch room details');
+    } finally {
+      setLoadingStudents(false);
+      setShowStudentModal(true);
+    }
+  };
+
+  const fetchOccupancyHistory = async (roomId, academicYear = '') => {
+    setLoadingHistory(true);
+    try {
+      const params = academicYear ? { academicYear } : {};
+      const response = await api.get(`/api/admin/rooms/${roomId}/occupancy-history`, { params });
+      if (response.data.success) {
+        setOccupancyHistory(response.data.data || []);
+        const years = response.data.meta?.academicYears || [];
+        setHistoryAcademicYears(years);
+      }
+    } catch (error) {
+      console.error('Error fetching occupancy history:', error);
+      toast.error('Failed to fetch occupancy history');
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleRoomModalTabChange = async (tab) => {
+    setRoomModalTab(tab);
+    if (tab === 'history' && selectedRoom?._id) {
+      const ay = historyFilterAY || filters.academicYear || '';
+      await fetchOccupancyHistory(selectedRoom._id, ay);
+    }
+  };
+
+  const handleHistoryAYFilter = async (ay) => {
+    setHistoryFilterAY(ay);
+    if (selectedRoom?._id) {
+      await fetchOccupancyHistory(selectedRoom._id, ay);
+    }
+  };
+
+  const groupedOccupancyHistory = useMemo(() => {
+    const groups = {};
+    occupancyHistory.forEach((row) => {
+      const ay = row.academicYear || 'Unknown';
+      if (!groups[ay]) groups[ay] = [];
+      groups[ay].push(row);
+    });
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [occupancyHistory]);
+
+  const openBillModal = async (room) => {
+    try {
+      setSelectedRoom(room);
+      setShowBillModal(true);
+      setBillLoading(true);
+
+      // Fetch default rate
+      let defaultRate = '';
+      try {
+        const rateRes = await api.get('/api/rooms/electricity-default-rate', {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (rateRes.data.success) {
+          defaultRate = rateRes.data.rate;
+        }
+      } catch (err) {
+        // fallback: leave as empty
+      }
+      setBillForm(prev => ({ ...prev, rate: defaultRate }));
+
+      const billsResponse = await axios.get(
+        `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/admin/rooms/${room._id}/electricity-bill`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (billsResponse.data.success) {
+        setBillHistory(billsResponse.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching bill history:', error);
+      toast.error(error.response?.data?.message || 'Failed to fetch bill history');
+    } finally {
+      setBillLoading(false);
+    }
+  };
+
+  const handleBillFormChange = (e) => {
+    const { name, value } = e.target;
+
+    setBillForm(prev => {
+      const updatedForm = { ...prev, [name]: value };
+
+      // If month is changed, try to auto-fill start units
+      if (name === 'month' && value) {
+        const lastMonthBill = billHistory
+          .slice()
+          .sort((a, b) => new Date(b.month) - new Date(a.month))
+          .find(bill => {
+            const billDate = new Date(bill.month + '-01');
+            const selectedDate = new Date(value + '-01');
+            return billDate < selectedDate;
+          });
+
+        if (lastMonthBill) {
+          updatedForm.startUnits = lastMonthBill.endUnits;
+        }
+      }
+      return updatedForm;
+    });
+
+    // Calculate real-time preview
+    calculateRealTimePreview();
+  };
+
+  const calculateRealTimePreview = () => {
+    const { month, startUnits, endUnits, rate } = billForm;
+
+    if (month && startUnits && endUnits) {
+      const start = Number(startUnits);
+      const end = Number(endUnits);
+      const billRate = rate ? Number(rate) : 5;
+
+      if (end >= start) {
+        const consumption = end - start;
+        const total = consumption * billRate;
+
+        setRealTimePreview({
+          consumption,
+          rate: billRate,
+          total,
+          isValid: true
+        });
+      } else {
+        setRealTimePreview({
+          consumption: 0,
+          rate: billRate,
+          total: 0,
+          isValid: false
+        });
+      }
+    } else {
+      setRealTimePreview(null);
+    }
+  };
+
+  const calculateBillPreview = () => {
+    const { month, startUnits, endUnits, rate } = billForm;
+
+    if (!month || !startUnits || !endUnits) {
+      return null;
+    }
+
+    const start = Number(startUnits);
+    const end = Number(endUnits);
+    const billRate = rate ? Number(rate) : 5; // Default rate if not provided
+
+    if (end < start) {
+      return null;
+    }
+
+    const consumption = end - start;
+    const total = consumption * billRate;
+
+    return {
+      month,
+      startUnits: start,
+      endUnits: end,
+      consumption,
+      rate: billRate,
+      total,
+      isUpdate: billHistory.some(bill => bill.month === month)
+    };
+  };
+
+  const handleBillPreview = (e) => {
+    e.preventDefault();
+    const preview = calculateBillPreview();
+
+    if (!preview) {
+      toast.error('Please fill all required fields correctly');
+      return;
+    }
+
+    setBillPreview(preview);
+    setShowBillPreviewModal(true);
+  };
+
+  const handleBillConfirm = async () => {
+    if (!canManageBills) {
+      toast.error('You do not have permission to manage electricity bills');
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/admin/rooms/${selectedRoom._id}/electricity-bill`,
+        {
+          month: billPreview.month,
+          startUnits: billPreview.startUnits,
+          endUnits: billPreview.endUnits,
+          rate: billPreview.rate
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        // Refresh bill history
+        const billsResponse = await axios.get(
+          `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/admin/rooms/${selectedRoom._id}/electricity-bill`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          }
+        );
+        setBillHistory(billsResponse.data.data);
+
+        // Reset form
+        setBillForm({
+          month: '',
+          startUnits: '',
+          endUnits: '',
+          rate: ''
+        });
+
+        setShowBillPreviewModal(false);
+        setBillPreview(null);
+        toast.success(`Bill ${billPreview.isUpdate ? 'updated' : 'added'} successfully`);
+      }
+    } catch (error) {
+      console.error('Error saving bill:', error);
+      toast.error(error.response?.data?.message || 'Failed to save bill');
+    }
+  };
+
+  const calculateEditRealTimePreview = () => {
+    const { month, startUnits, endUnits, rate } = editBillForm;
+
+    if (month && startUnits && endUnits) {
+      const start = Number(startUnits);
+      const end = Number(endUnits);
+      const billRate = rate ? Number(rate) : 5;
+
+      if (end >= start) {
+        const consumption = end - start;
+        const total = consumption * billRate;
+
+        setEditRealTimePreview({
+          consumption,
+          rate: billRate,
+          total,
+          isValid: true
+        });
+      } else {
+        setEditRealTimePreview({
+          consumption: 0,
+          rate: billRate,
+          total: 0,
+          isValid: false
+        });
+      }
+    } else {
+      setEditRealTimePreview(null);
+    }
+  };
+
+  const calculateEditBillPreview = () => {
+    const { month, startUnits, endUnits, rate } = editBillForm;
+
+    if (!month || !startUnits || !endUnits) {
+      return null;
+    }
+
+    const start = Number(startUnits);
+    const end = Number(endUnits);
+    const billRate = rate ? Number(rate) : 5; // Default rate if not provided
+
+    if (end < start) {
+      return null;
+    }
+
+    const consumption = end - start;
+    const total = consumption * billRate;
+
+    return {
+      month,
+      startUnits: start,
+      endUnits: end,
+      consumption,
+      rate: billRate,
+      total
+    };
+  };
+
+  const handleEditBillPreview = (e) => {
+    e.preventDefault();
+    const preview = calculateEditBillPreview();
+
+    if (!preview) {
+      toast.error('Please fill all required fields correctly');
+      return;
+    }
+
+    setEditBillPreview(preview);
+    setShowEditBillPreviewModal(true);
+  };
+
+  const handleEditBillConfirm = async () => {
+    if (!canManageBills) {
+      toast.error('You do not have permission to manage electricity bills');
+      return;
+    }
+
+    try {
+      const payload = {
+        month: editBillPreview.month,
+        startUnits: editBillPreview.startUnits,
+        endUnits: editBillPreview.endUnits,
+        rate: editBillPreview.rate
+      };
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/admin/rooms/${selectedRoom._id}/electricity-bill`,
+        payload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        // Refresh bill history
+        const billsResponse = await axios.get(
+          `${import.meta.env.VITE_API_URL.replace(/\/$/, '')}/api/admin/rooms/${selectedRoom._id}/electricity-bill`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          }
+        );
+        setBillHistory(billsResponse.data.data);
+        setShowEditBillPreviewModal(false);
+        setShowEditBillModal(false);
+        setEditBillPreview(null);
+        toast.success('Bill updated successfully');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update bill');
+    }
+  };
+
+  const handleEditBillFormChange = (e) => {
+    const { name, value } = e.target;
+    setEditBillForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Calculate course counts from room students
+  const calculateCourseCounts = (students) => {
+    const courseCounts = {
+      'B.Tech': 0,
+      'Diploma': 0,
+      'Degree': 0,
+      'Pharmacy': 0
+    };
+
+    students.forEach(student => {
+      const courseName = student.course?.name || student.course || '';
+      if (courseName.includes('B.Tech') || courseName.includes('BTECH')) {
+        courseCounts['B.Tech']++;
+      } else if (courseName.includes('Diploma')) {
+        courseCounts['Diploma']++;
+      } else if (courseName.includes('Degree')) {
+        courseCounts['Degree']++;
+      } else if (courseName.includes('Pharmacy')) {
+        courseCounts['Pharmacy']++;
+      }
+    });
+
+    return courseCounts;
+  };
+
+
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="mx-auto  mt-12 sm:mt-0">
+      <SEO title="Room Management" />
+
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-blue-900 to-blue-700 bg-clip-text text-transparent">Room Management</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+            Manage hostel rooms and their assignments
+            {analyticsMode === 'ay' && filters.academicYear ? (
+              <span className="ml-1 text-blue-700 font-medium">· {filters.academicYear}</span>
+            ) : (
+              <span className="ml-1 text-green-700 font-medium">· Live</span>
+            )}
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 sm:gap-3 w-full lg:w-auto">
+          <div className="flex flex-wrap items-center gap-2 bg-white p-1.5 rounded-xl shadow-sm border border-gray-100">
+            <div className="relative grid grid-cols-2 items-center bg-gray-200/80 p-1 rounded-xl w-56 sm:w-64 border border-gray-300/60 shadow-inner">
+              <motion.div
+                className="absolute top-1 bottom-1 bg-blue-600 rounded-lg shadow-md"
+                initial={false}
+                animate={{
+                  left: analyticsMode === 'live' ? '4px' : 'calc(50% + 2px)',
+                  width: 'calc(50% - 6px)'
+                }}
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setStatsLoading(true);
+                  setAnalyticsMode('live');
+                }}
+                className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
+                  analyticsMode === 'live' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                Live
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStatsLoading(true);
+                  setAnalyticsMode('ay');
+                }}
+                className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
+                  analyticsMode === 'ay' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                AY Wise
+              </button>
+            </div>
+            <select
+              name="academicYear"
+              value={filters.academicYear}
+              onChange={handleFilterChange}
+              disabled={analyticsMode === 'live'}
+              className={`px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                analyticsMode === 'live'
+                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                  : 'bg-white text-gray-800 border-gray-300'
+              }`}
+              title={analyticsMode === 'live' ? 'Switch to AY Wise to select academic year' : 'Select Academic Year'}
+            >
+              {generateAcademicYears().map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            disabled={!canAddRoom}
+            className={`flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg transition-colors text-xs sm:text-sm ${canAddRoom
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+              }`}
+            title={!canAddRoom ? 'You need full access to add' : 'Add hostel/category/room'}
+          >
+            {!canAddRoom ? <LockClosedIcon className="w-4 h-4 sm:w-5 sm:h-5" /> : <PlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />}
+            Add
+          </button>
+        </div>
+      </div>
+
+
+
+      {/* Room Statistics */}
+      <div className="bg-white rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 lg:p-6 mb-4 sm:mb-6">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+            Room Statistics
+            {analyticsMode === 'ay' && filters.academicYear ? (
+              <span className="ml-2 text-sm font-normal text-gray-500">({filters.academicYear} · all statuses)</span>
+            ) : (
+              <span className="ml-2 text-sm font-normal text-gray-500">(Live · active)</span>
+            )}
+          </h2>
+          {statsLoading && (
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-blue-600">
+              <LoadingSpinner size="sm" />
+              <span>Updating…</span>
+            </div>
+          )}
+        </div>
+
+        {statsLoading ? (
+          <div className="space-y-4 sm:space-y-6 animate-pulse">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="bg-gray-100 p-2 sm:p-4 rounded-lg h-16 sm:h-20" />
+              ))}
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full w-full" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="border border-gray-200 rounded-lg p-3 sm:p-4 space-y-3">
+                  <div className="h-5 bg-gray-100 rounded w-1/3" />
+                  <div className="grid grid-cols-3 gap-2">
+                    {Array.from({ length: 3 }).map((_, j) => (
+                      <div key={j} className="h-12 bg-gray-100 rounded" />
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, j) => (
+                      <div key={j} className="h-4 bg-gray-100 rounded" />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : roomStats ? (
+          <>
+          {/* Overall Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 mb-4 sm:mb-6">
+            <div className="bg-blue-50 p-2 sm:p-4 rounded-lg">
+              <div className="text-lg sm:text-2xl font-bold text-blue-600">{roomStats.overall.totalRooms}</div>
+              <div className="text-xs sm:text-sm text-gray-600">Total Rooms</div>
+            </div>
+            <div className="bg-green-50 p-2 sm:p-4 rounded-lg">
+              <div className="text-lg sm:text-2xl font-bold text-green-600">{roomStats.overall.activeRooms}</div>
+              <div className="text-xs sm:text-sm text-gray-600">Active Rooms</div>
+            </div>
+            <div className="bg-purple-50 p-2 sm:p-4 rounded-lg">
+              <div className="text-lg sm:text-2xl font-bold text-purple-600">{roomStats.overall.totalBeds}</div>
+              <div className="text-xs sm:text-sm text-gray-600">Total Beds</div>
+            </div>
+            <div className="bg-orange-50 p-2 sm:p-4 rounded-lg">
+              <div className="text-lg sm:text-2xl font-bold text-orange-600">{roomStats.overall.filledBeds}</div>
+              <div className="text-xs sm:text-sm text-gray-600">Filled Beds</div>
+            </div>
+            <div className="bg-gray-50 p-2 sm:p-4 rounded-lg col-span-2 sm:col-span-1">
+              <div className="text-lg sm:text-2xl font-bold text-gray-600">{roomStats.overall.availableBeds}</div>
+              <div className="text-xs sm:text-sm text-gray-600">Available Beds</div>
+            </div>
+          </div>
+
+          {/* Bed Occupancy Rate */}
+          <div className="mb-4 sm:mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs sm:text-sm font-medium text-gray-700">Bed Occupancy Rate</span>
+              <span className="text-xs sm:text-sm font-semibold text-gray-900">
+                {roomStats.overall.totalBeds > 0
+                  ? Math.round((roomStats.overall.filledBeds / roomStats.overall.totalBeds) * 100)
+                  : 0}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{
+                  width: `${roomStats.overall.totalBeds > 0
+                    ? (roomStats.overall.filledBeds / roomStats.overall.totalBeds) * 100
+                    : 0}%`
+                }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Stats by Hostel */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+            {roomStats.byHostel?.map((hostelStat) => (
+              <div key={hostelStat.hostelId} className="border border-gray-200 rounded-lg p-3 sm:p-4">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-2 sm:mb-3">{hostelStat.hostelName}</h3>
+
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
+                  <div className="text-center">
+                    <div className="text-lg sm:text-xl font-bold text-blue-600">{hostelStat.totalBeds}</div>
+                    <div className="text-xs text-gray-600">Total Beds</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg sm:text-xl font-bold text-green-600">{hostelStat.filledBeds}</div>
+                    <div className="text-xs text-gray-600">Filled</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg sm:text-xl font-bold text-gray-600">{hostelStat.availableBeds}</div>
+                    <div className="text-xs text-gray-600">Available</div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 sm:space-y-2">
+                  {hostelStat.categories.map((category) => (
+                    <div key={category.categoryId} className="flex justify-between items-center text-xs sm:text-sm">
+                      <span className="font-medium text-gray-700">{category.categoryName}</span>
+                      <span className="text-gray-600">
+                        {category.filledBeds}/{category.totalBeds} beds
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          </>
+        ) : (
+          <div className="py-8 text-center text-sm text-gray-500">Unable to load room statistics.</div>
+        )}
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 mb-4 sm:mb-6">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+          <div className="flex-1">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+              Hostel
+            </label>
+            <select
+              name="hostel"
+              value={filters.hostel}
+              onChange={handleFilterChange}
+              className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+            >
+              <option value="">All Hostels</option>
+              {hostels.map(h => (
+                <option key={h._id} value={h._id}>{h.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
+            <select
+              name="category"
+              value={filters.category}
+              onChange={handleFilterChange}
+              className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+            >
+              <option value="">All Categories</option>
+                    {getCategoriesForHostel(filters.hostel).map(cat => (
+                <option key={cat._id} value={cat._id}>{cat.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Room Management Table */}
+      <div className="space-y-6 sm:space-y-8">
+        {Object.entries(groupedRooms).map(([key, rooms]) => {
+          const [hostelName, categoryName] = key.split('||');
+          return (
+            <div key={key} className="space-y-3 sm:space-y-4">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+                {hostelName} - Category {categoryName}
+              </h2>
+              <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Room Number
+                        </th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Bed Count
+                        </th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Students{analyticsMode === 'ay' && filters.academicYear ? ` (${filters.academicYear})` : ' (Live)'}
+                        </th>
+                        <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {rooms.map((room) => (
+                        <motion.tr
+                          key={room._id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="hover:bg-gray-50 transition-colors"
+                        >
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                            <div
+                              className="cursor-pointer"
+                              onClick={() => handleRoomClick(room)}
+                            >
+                              <div className="text-xs sm:text-sm font-semibold text-gray-900">
+                                Room {room.roomNumber}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5 sm:gap-2">
+                              <BuildingOfficeIcon className="w-3 h-3 sm:w-4 sm:h-4 text-gray-400" />
+                              <span className={`text-xs sm:text-sm px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full ${room.isActive
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                                }`}>
+                                {room.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                            <span className="bg-blue-100 text-blue-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs font-medium">
+                              {room.bedCount} Beds
+                            </span>
+                          </td>
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5 sm:gap-2">
+                              <UserGroupIcon className="w-3 h-3 sm:w-4 sm:h-4 text-gray-400" />
+                              <span className="text-xs sm:text-sm text-gray-900">
+                                {room.studentCount || 0} Students
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              {canEditRoom ? (
+                                <button
+                                  className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  onClick={(e) => { e.stopPropagation(); openEditModal(room); }}
+                                  title="Edit Room"
+                                >
+                                  <PencilIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  className="p-1.5 sm:p-2 text-gray-400 cursor-not-allowed"
+                                  disabled
+                                  title="You need full access to edit rooms"
+                                >
+                                  <LockClosedIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                                </button>
+                              )}
+                              {canDeleteRoom ? (
+                                <button
+                                  className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteRoom(room._id); }}
+                                  title="Delete Room"
+                                >
+                                  <TrashIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  className="p-1.5 sm:p-2 text-gray-400 cursor-not-allowed"
+                                  disabled
+                                  title="You need full access to delete rooms"
+                                >
+                                  <LockClosedIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Add Modal */}
+      <AnimatePresence>
+        {showAddModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-3 sm:mb-4">
+                <h2 className="text-lg sm:text-xl font-semibold">Add</h2>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex gap-2 mb-4">
+                {['hostel', 'category', 'room'].map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setAddTab(tab)}
+                    className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm ${addTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    {tab === 'hostel' ? 'Hostel' : tab === 'category' ? 'Category' : 'Room'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Hostel Form */}
+              {addTab === 'hostel' && (
+                <div className="space-y-3 sm:space-y-4">
+                  <form onSubmit={handleCreateHostelSubmit} className="space-y-3 sm:space-y-4">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Hostel Name
+                      </label>
+                      <input
+                        type="text"
+                        name="name"
+                        value={hostelForm.name}
+                        onChange={handleHostelFormChange}
+                        required
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Hostel Code <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        name="code"
+                        value={hostelForm.code}
+                        onChange={handleHostelFormChange}
+                        required
+                        placeholder="e.g. BH, GH1"
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm uppercase"
+                      />
+                      <p className="mt-1 text-[10px] sm:text-xs text-gray-500">
+                        Used in academic-year sequence: College + Course + Hostel Code + number
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Description (optional)
+                      </label>
+                      <textarea
+                        name="description"
+                        value={hostelForm.description}
+                        onChange={handleHostelFormChange}
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                        rows={2}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 sm:gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddModal(false)}
+                        className="px-3 sm:px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-xs sm:text-sm"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                      >
+                        Create Hostel
+                      </button>
+                    </div>
+                  </form>
+                  {hostels.length > 0 && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 sm:p-3">
+                      <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">Available Hostels</div>
+                      <ul className="space-y-1 text-xs sm:text-sm text-gray-700 max-h-32 overflow-auto">
+                        {hostels.map(h => (
+                          <li key={h._id} className="flex justify-between">
+                            <span>{h.name}</span>
+                            <span className="text-gray-500 text-[11px] sm:text-xs">{h.isActive ? 'Active' : 'Inactive'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Category Form */}
+              {addTab === 'category' && (
+                <div className="space-y-3 sm:space-y-4">
+                  <form onSubmit={handleCreateCategorySubmit} className="space-y-3 sm:space-y-4">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Hostel
+                      </label>
+                      <select
+                        name="hostel"
+                        value={categoryForm.hostel}
+                        onChange={handleCategoryFormChange}
+                        required
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      >
+                        <option value="">Select Hostel</option>
+                        {hostels.map(h => (
+                          <option key={h._id} value={h._id}>{h.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Category Name
+                      </label>
+                      <input
+                        type="text"
+                        name="name"
+                        value={categoryForm.name}
+                        onChange={handleCategoryFormChange}
+                        required
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Description (optional)
+                      </label>
+                      <textarea
+                        name="description"
+                        value={categoryForm.description}
+                        onChange={handleCategoryFormChange}
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                        rows={2}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 sm:gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddModal(false)}
+                        className="px-3 sm:px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-xs sm:text-sm"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                        disabled={!categoryForm.hostel}
+                      >
+                        Create Category
+                      </button>
+                    </div>
+                  </form>
+                  {categoryForm.hostel && getCategoriesForHostel(categoryForm.hostel).length > 0 && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 sm:p-3">
+                      <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">Available Categories</div>
+                      <ul className="space-y-1 text-xs sm:text-sm text-gray-700 max-h-32 overflow-auto">
+                        {getCategoriesForHostel(categoryForm.hostel).map(cat => (
+                          <li key={cat._id} className="flex justify-between">
+                            <span>{cat.name}</span>
+                            <span className="text-gray-500 text-[11px] sm:text-xs">{cat.isActive ? 'Active' : 'Inactive'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Room Form */}
+              {addTab === 'room' && (
+                <form onSubmit={handleAddRoom} className="space-y-3 sm:space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Hostel
+                      </label>
+                      <select
+                        name="hostel"
+                        value={formData.hostel}
+                        onChange={handleFormChange}
+                        required
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      >
+                        <option value="">Select Hostel</option>
+                        {hostels.map(h => (
+                          <option key={h._id} value={h._id}>{h.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Category
+                      </label>
+                      <select
+                        name="category"
+                        value={formData.category}
+                        onChange={handleFormChange}
+                        required
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      >
+                        <option value="">Select Category</option>
+                        {getCategoriesForHostel(formData.hostel).map(cat => (
+                          <option key={cat._id} value={cat._id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {hostels.length > 0 && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 sm:p-3">
+                        <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">Available Hostels</div>
+                        <ul className="space-y-1 text-xs sm:text-sm text-gray-700 max-h-24 overflow-auto">
+                          {hostels.map(h => (
+                            <li key={h._id} className="flex justify-between">
+                              <span>{h.name}</span>
+                              <span className="text-gray-500 text-[11px] sm:text-xs">{h.isActive ? 'Active' : 'Inactive'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {formData.hostel && getCategoriesForHostel(formData.hostel).length > 0 && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 sm:p-3">
+                        <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">Available Categories</div>
+                        <ul className="space-y-1 text-xs sm:text-sm text-gray-700 max-h-24 overflow-auto">
+                          {getCategoriesForHostel(formData.hostel).map(cat => (
+                            <li key={cat._id} className="flex justify-between">
+                              <span>{cat.name}</span>
+                              <span className="text-gray-500 text-[11px] sm:text-xs">{cat.isActive ? 'Active' : 'Inactive'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {formData.hostel && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 sm:p-3">
+                        <div className="text-xs sm:text-sm font-semibold text-gray-800 mb-1">Available Rooms</div>
+                        <ul className="space-y-1 text-xs sm:text-sm text-gray-700 max-h-24 overflow-auto">
+                          {rooms
+                            .filter(r => {
+                              const rHostel = r.hostel?._id || r.hostel;
+                              const rCategory = r.category?._id || r.category;
+                              const hostelMatch = rHostel === formData.hostel;
+                              if (!hostelMatch) return false;
+                              if (formData.category) {
+                                return rCategory === formData.category;
+                              }
+                              return true;
+                            })
+                            .map(r => (
+                              <li key={r._id} className="flex justify-between">
+                                <span>{r.roomNumber}</span>
+                                <span className="text-gray-500 text-[11px] sm:text-xs">
+                                  {r.category?.name || r.categoryName || 'N/A'}
+                                </span>
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                      Room Number
+                    </label>
+                    <input
+                      type="text"
+                      name="roomNumber"
+                      value={formData.roomNumber}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      placeholder="Enter room number"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                      Bed Count
+                    </label>
+                    <input
+                      type="number"
+                      name="bedCount"
+                      min={1}
+                      value={formData.bedCount}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                      placeholder="Enter bed count"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                      Meter Type
+                    </label>
+                    <select
+                      name="meterType"
+                      value={formData.meterType}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    >
+                      <option value="single">Single Meter</option>
+                      <option value="dual">Dual Meter</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {formData.meterType === 'dual' 
+                        ? 'This room has two electricity meters. You will need to enter readings for both meters when billing.'
+                        : 'This room has a single electricity meter.'}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2 sm:gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(false)}
+                      className="px-3 sm:px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-xs sm:text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                    >
+                      Add Room
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Room Modal */}
+      <AnimatePresence>
+        {showEditModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-6 w-full max-w-md"
+            >
+              <div className="flex justify-between items-center mb-3 sm:mb-4">
+                <h2 className="text-lg sm:text-xl font-semibold">Edit Room</h2>
+                <button
+                  onClick={() => setShowEditModal(false)}
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
+              <form onSubmit={handleEditRoom} className="space-y-3 sm:space-y-4">
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Hostel
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      name="hostel"
+                      value={formData.hostel}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    >
+                      <option value="">Select Hostel</option>
+                      {hostels.map(h => (
+                        <option key={h._id} value={h._id}>{h.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleCreateHostel}
+                      className="px-2 sm:px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-xs sm:text-sm hover:bg-green-200"
+                    >
+                      New
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Category
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      name="category"
+                      value={formData.category}
+                      onChange={handleFormChange}
+                      required
+                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    >
+                      <option value="">Select Category</option>
+                      {getCategoriesForHostel(formData.hostel).map(cat => (
+                        <option key={cat._id} value={cat._id}>{cat.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleCreateCategory}
+                      className="px-2 sm:px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs sm:text-sm hover:bg-blue-200"
+                      disabled={!formData.hostel}
+                    >
+                      New
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Room Number
+                  </label>
+                  <input
+                    type="text"
+                    name="roomNumber"
+                    value={formData.roomNumber}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Bed Count
+                  </label>
+                  <input
+                    type="number"
+                    name="bedCount"
+                    min={1}
+                    value={formData.bedCount}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    placeholder="Enter bed count"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                    Meter Type
+                  </label>
+                  <select
+                    name="meterType"
+                    value={formData.meterType}
+                    onChange={handleFormChange}
+                    required
+                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                  >
+                    <option value="single">Single Meter</option>
+                    <option value="dual">Dual Meter</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formData.meterType === 'dual' 
+                      ? 'This room has two electricity meters. You will need to enter readings for both meters when billing.'
+                      : 'This room has a single electricity meter.'}
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditModal(false)}
+                    className="px-3 sm:px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-xs sm:text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm"
+                  >
+                    Update Room
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Student Details Modal */}
+      <AnimatePresence>
+        {showStudentModal && selectedRoom && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-lg sm:rounded-xl p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-3 sm:mb-4">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-semibold">
+                    Room {selectedRoom.roomNumber} Details
+                  </h2>
+                  <p className="text-xs sm:text-sm text-gray-500">
+                    {(selectedRoom.hostel?.name || selectedRoom.hostel || 'Hostel')} • {(selectedRoom.category?.name || selectedRoom.category || 'Category')}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowStudentModal(false)}
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
+
+              <div className="flex gap-2 mb-4 border-b border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => handleRoomModalTabChange('occupants')}
+                  className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+                    roomModalTab === 'occupants'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Current Occupants
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRoomModalTabChange('history')}
+                  className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+                    roomModalTab === 'history'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Occupancy History
+                </button>
+              </div>
+
+              {roomModalTab === 'history' ? (
+                <>
+                  <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <label className="text-sm font-medium text-gray-700 shrink-0">Academic Year</label>
+                    <select
+                      value={historyFilterAY}
+                      onChange={(e) => handleHistoryAYFilter(e.target.value)}
+                      className="w-full sm:w-56 px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                    >
+                      <option value="">All years</option>
+                      {historyAcademicYears.map((ay) => (
+                        <option key={ay} value={ay}>{ay}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {loadingHistory ? (
+                    <div className="flex justify-center items-center h-32">
+                      <LoadingSpinner size="md" />
+                    </div>
+                  ) : groupedOccupancyHistory.length === 0 ? (
+                    <div className="text-center py-8 text-sm text-gray-500">
+                      No occupancy history for this room yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-5 max-h-[50vh] overflow-y-auto pr-1">
+                      {groupedOccupancyHistory.map(([academicYear, rows]) => (
+                        <div key={academicYear} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex justify-between items-center">
+                            <span className="text-sm font-semibold text-blue-900">{academicYear}</span>
+                            <span className="text-xs text-blue-700">{rows.length} student(s)</span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-100 text-xs sm:text-sm">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Student</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Roll No</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Course / Yr</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Bed / Locker</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">From</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">To</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-500">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {rows.map((row) => (
+                                  <tr key={row._id} className="hover:bg-gray-50">
+                                    <td className="px-3 py-2">{row.studentName}</td>
+                                    <td className="px-3 py-2">{row.rollNumber}</td>
+                                    <td className="px-3 py-2 text-gray-600">
+                                      {[row.course, row.yearOfStudy ? `Yr ${row.yearOfStudy}` : ''].filter(Boolean).join(' · ') || '—'}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {[row.bedNumber, row.lockerNumber].filter(Boolean).join(' / ') || '—'}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {row.allocatedFrom ? new Date(row.allocatedFrom).toLocaleDateString('en-IN') : '—'}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {row.allocatedTo ? new Date(row.allocatedTo).toLocaleDateString('en-IN') : '—'}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                        row.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+                                      }`}>
+                                        {row.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : loadingStudents ? (
+                <div className="flex justify-center items-center h-32">
+                  <LoadingSpinner size="md" />
+                </div>
+              ) : (!roomStudents || roomStudents.length === 0) && (!roomStaff || roomStaff.length === 0) ? (
+                <div className="text-center py-6 sm:py-8">
+                  <UserGroupIcon className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-3" />
+                  <p className="text-xs sm:text-sm text-gray-500">No occupants assigned to this room</p>
+                </div>
+              ) : (
+                <>
+                  {/* Room Information */}
+                  <div className="mb-6">
+                    <div className="bg-gray-50 p-3 sm:p-4 rounded-lg">
+                      <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">Room Information</h3>
+                      <div className="space-y-2 text-xs sm:text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Room Number:</span>
+                          <span className="font-medium">{selectedRoom.roomNumber}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Hostel:</span>
+                          <span className="font-medium">{selectedRoom.hostel?.name || selectedRoom.hostel || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Category:</span>
+                          <span className="font-medium">{selectedRoom.category?.name || selectedRoom.category || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Total Beds:</span>
+                          <span className="font-medium">{selectedRoom.bedCount || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Students:</span>
+                          <span className="font-medium">{selectedRoom.studentCount || roomStudents?.length || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Staff:</span>
+                          <span className="font-medium">{selectedRoom.staffCount || roomStaff?.length || 0}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Total Occupied:</span>
+                          <span className="font-medium">{selectedRoom.totalOccupancy || ((selectedRoom.studentCount || roomStudents?.length || 0) + (selectedRoom.staffCount || roomStaff?.length || 0))}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Available Beds:</span>
+                          <span className="font-medium text-green-600">{selectedRoom.availableBeds || ((selectedRoom.bedCount || 0) - ((selectedRoom.studentCount || roomStudents?.length || 0) + (selectedRoom.staffCount || roomStaff?.length || 0)))}</span>
+                        </div>
+                        {selectedRoom.occupancyRate !== undefined && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Occupancy Rate:</span>
+                            <span className="font-medium">{selectedRoom.occupancyRate}%</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Staff Members List */}
+                  {roomStaff && roomStaff.length > 0 && (
+                    <div className="mb-6">
+                      <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center">
+                        <UserIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-purple-600" />
+                        Staff Members ({roomStaff.length})
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4">
+                        {roomStaff.map((staff) => (
+                          <div
+                            key={staff._id}
+                            className="bg-purple-50 border border-purple-200 rounded-lg p-3 sm:p-4 flex items-start gap-3 sm:gap-4"
+                          >
+                            <div className="bg-purple-100 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+                              <UserIcon className="w-4 h-4 sm:w-6 sm:h-6 text-purple-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-medium text-gray-900 text-sm sm:text-base truncate mb-2">{staff.name}</h3>
+                              <div className="space-y-1.5 text-xs sm:text-sm text-gray-600">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">Profession:</span>
+                                  <span className="truncate">{staff.profession}</span>
+                                </div>
+                                {staff.department && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">Department:</span>
+                                    <span className="truncate">{staff.department}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                  <PhoneIcon className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 text-gray-500" />
+                                  <span className="truncate">Phone: {staff.phoneNumber}</span>
+                                </div>
+                                {staff.bedNumber && (
+                                  <div className="mt-2">
+                                    <span className="text-xs bg-purple-100 text-purple-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
+                                      Bed: {staff.bedNumber}
+                                    </span>
+                                  </div>
+                                )}
+                                {staff.stayType && (
+                                  <div className="mt-2">
+                                    <span className={`text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded ${
+                                      staff.stayType === 'monthly' 
+                                        ? 'bg-indigo-100 text-indigo-800' 
+                                        : 'bg-blue-100 text-blue-800'
+                                    }`}>
+                                      {staff.stayType === 'monthly' 
+                                        ? `Monthly${staff.selectedMonth ? ` (${new Date(staff.selectedMonth + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})` : ''}`
+                                        : 'Daily'}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Course Count Summary - Only show if there are students */}
+                  {roomStudents && roomStudents.length > 0 && (
+                    <div className="bg-gray-50 rounded-lg p-3 sm:p-4 mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <ChartBarIcon className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+                        <h3 className="text-sm sm:text-base font-semibold text-gray-900">Course Distribution</h3>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                        {Object.entries(calculateCourseCounts(roomStudents)).map(([course, count]) => {
+                          // Define colors for each course
+                          const getCourseColors = (courseName) => {
+                            switch (courseName) {
+                              case 'B.Tech':
+                                return {
+                                  bg: 'bg-blue-50',
+                                  border: 'border-blue-200',
+                                  text: 'text-blue-700',
+                                  count: 'text-blue-600',
+                                  icon: 'text-blue-500'
+                                };
+                              case 'Diploma':
+                                return {
+                                  bg: 'bg-green-50',
+                                  border: 'border-green-200',
+                                  text: 'text-green-700',
+                                  count: 'text-green-600',
+                                  icon: 'text-green-500'
+                                };
+                              case 'Degree':
+                                return {
+                                  bg: 'bg-purple-50',
+                                  border: 'border-purple-200',
+                                  text: 'text-purple-700',
+                                  count: 'text-purple-600',
+                                  icon: 'text-purple-500'
+                                };
+                              case 'Pharmacy':
+                                return {
+                                  bg: 'bg-orange-50',
+                                  border: 'border-orange-200',
+                                  text: 'text-orange-700',
+                                  count: 'text-orange-600',
+                                  icon: 'text-orange-500'
+                                };
+                              default:
+                                return {
+                                  bg: 'bg-gray-50',
+                                  border: 'border-gray-200',
+                                  text: 'text-gray-700',
+                                  count: 'text-gray-600',
+                                  icon: 'text-gray-500'
+                                };
+                            }
+                          };
+
+                          const colors = getCourseColors(course);
+
+                          return (
+                            <div key={course} className={`${colors.bg} ${colors.border} border rounded-lg p-2 sm:p-3 text-center transition-all duration-200 hover:shadow-sm`}>
+                              <div className={`text-lg sm:text-xl font-bold ${colors.count}`}>{count}</div>
+                              <div className={`text-xs sm:text-sm font-medium ${colors.text}`}>{course}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Student List */}
+                  {roomStudents && roomStudents.length > 0 && (
+                    <div>
+                      <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center">
+                        <AcademicCapIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2 text-blue-600" />
+                        Students ({roomStudents.length})
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        {roomStudents.map((student) => (
+                          <div
+                            key={student._id}
+                            className="bg-gray-50 rounded-lg p-3 sm:p-4 flex items-start gap-3 sm:gap-4"
+                          >
+                            <div className="bg-blue-100 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+                              <UserIcon className="w-4 h-4 sm:w-6 sm:h-6 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-medium text-gray-900 text-sm sm:text-base truncate mb-2">{student.name}</h3>
+                              <div className="space-y-1.5 text-xs sm:text-sm text-gray-600">
+                                <div className="flex items-center gap-2">
+                                  <AcademicCapIcon className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 text-gray-500" />
+                                  <span className="truncate">Roll No: {student.rollNumber}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <PhoneIcon className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0 text-gray-500" />
+                                  <span className="truncate">Phone: {student.studentPhone}</span>
+                                </div>
+                                <div className="mt-2">
+                                  <span className="text-xs bg-blue-100 text-blue-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded truncate inline-block">
+                                    {(student.course?.name || student.course || 'N/A')} - {(student.branch?.name || student.branch || 'N/A')}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Electricity Bill Modal */}
+      <AnimatePresence>
+        {showBillModal && selectedRoom && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-xl p-6 w-full max-w-lg"
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Electricity Bill - Room {selectedRoom.roomNumber}</h2>
+                <button
+                  onClick={() => setShowBillModal(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+              <form onSubmit={handleBillPreview} className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Month (YYYY-MM)</label>
+                  <input type="month" name="month" value={billForm.month} onChange={handleBillFormChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Units</label>
+                    <input type="number" name="startUnits" value={billForm.startUnits} onChange={handleBillFormChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Units</label>
+                    <input type="number" name="endUnits" value={billForm.endUnits} onChange={handleBillFormChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate/Unit</label>
+                    <input type="number" name="rate" value={billForm.rate} onChange={handleBillFormChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg" step="0.01" />
+                  </div>
+                </div>
+
+                {/* Real-time Preview */}
+                {realTimePreview && (
+                  <div className={`p-3 rounded-lg border ${realTimePreview.isValid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Consumption:</span>
+                      <span className={`font-semibold ${realTimePreview.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                        {realTimePreview.consumption} units
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Rate:</span>
+                      <span className="font-semibold">₹{realTimePreview.rate}/unit</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm border-t border-gray-200 pt-1 mt-1">
+                      <span className="text-gray-600">Estimated Total:</span>
+                      <span className={`font-bold ${realTimePreview.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                        ₹{realTimePreview.total}
+                      </span>
+                    </div>
+                    {!realTimePreview.isValid && (
+                      <div className="text-red-600 text-xs mt-1">
+                        ⚠️ End units must be greater than or equal to start units
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="submit"
+                    disabled={!realTimePreview || !realTimePreview.isValid}
+                    className={`px-4 py-2 text-white rounded-lg transition-colors ${realTimePreview && realTimePreview.isValid
+                        ? 'bg-blue-600 hover:bg-blue-700'
+                        : 'bg-gray-400 cursor-not-allowed'
+                      }`}
+                  >
+                    Preview Bill
+                  </button>
+                </div>
+              </form>
+              <h3 className="text-lg font-semibold mb-2">Bill History</h3>
+              {billLoading ? (
+                <div className="text-center py-4">Loading...</div>
+              ) : !billHistory || billHistory.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">No bills found.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm border">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="px-2 py-1 border">Month</th>
+                        <th className="px-2 py-1 border">Start</th>
+                        <th className="px-2 py-1 border">End</th>
+                        <th className="px-2 py-1 border">Consumption</th>
+                        <th className="px-2 py-1 border">Rate</th>
+                        <th className="px-2 py-1 border">Total</th>
+                        <th className="px-2 py-1 border">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billHistory.map((bill, idx) => (
+                        <tr key={idx}>
+                          <td className="px-2 py-1 border">{bill.month}</td>
+                          <td className="px-2 py-1 border">{bill.startUnits}</td>
+                          <td className="px-2 py-1 border">{bill.endUnits}</td>
+                          <td className="px-2 py-1 border">{bill.consumption !== undefined ? bill.consumption : bill.endUnits - bill.startUnits}</td>
+                          <td className="px-2 py-1 border">{bill.rate}</td>
+                          <td className="px-2 py-1 border">{bill.total}</td>
+                          <td className="px-2 py-1 border">
+                            <button
+                              className="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-xs"
+                              onClick={() => {
+                                setEditBillForm({
+                                  month: bill.month,
+                                  startUnits: bill.startUnits,
+                                  endUnits: bill.endUnits,
+                                  rate: bill.rate
+                                });
+                                setShowEditBillModal(true);
+                              }}
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Bill Modal */}
+      <AnimatePresence>
+        {showEditBillModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-xl p-6 w-full max-w-md"
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Edit Bill</h2>
+                <button
+                  onClick={() => setShowEditBillModal(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+              <form onSubmit={handleEditBillPreview} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Month (YYYY-MM)</label>
+                  <input type="month" name="month" value={editBillForm.month} disabled className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100" />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Units</label>
+                    <input type="number" name="startUnits" value={editBillForm.startUnits} onChange={handleEditBillFormChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">End Units</label>
+                    <input type="number" name="endUnits" value={editBillForm.endUnits} onChange={handleEditBillFormChange} required className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate/Unit</label>
+                    <input type="number" name="rate" value={editBillForm.rate} onChange={handleEditBillFormChange} className="w-full px-3 py-2 border border-gray-300 rounded-lg" step="0.01" />
+                  </div>
+                </div>
+
+                {/* Real-time Preview for Edit */}
+                {editRealTimePreview && (
+                  <div className={`p-3 rounded-lg border ${editRealTimePreview.isValid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Consumption:</span>
+                      <span className={`font-semibold ${editRealTimePreview.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                        {editRealTimePreview.consumption} units
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Rate:</span>
+                      <span className="font-semibold">₹{editRealTimePreview.rate}/unit</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm border-t border-gray-200 pt-1 mt-1">
+                      <span className="text-gray-600">Estimated Total:</span>
+                      <span className={`font-bold ${editRealTimePreview.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                        ₹{editRealTimePreview.total}
+                      </span>
+                    </div>
+                    {!editRealTimePreview.isValid && (
+                      <div className="text-red-600 text-xs mt-1">
+                        ⚠️ End units must be greater than or equal to start units
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <button type="button" onClick={() => setShowEditBillModal(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
+                  <button
+                    type="submit"
+                    disabled={!editRealTimePreview || !editRealTimePreview.isValid}
+                    className={`px-4 py-2 text-white rounded-lg transition-colors ${editRealTimePreview && editRealTimePreview.isValid
+                        ? 'bg-blue-600 hover:bg-blue-700'
+                        : 'bg-gray-400 cursor-not-allowed'
+                      }`}
+                  >
+                    Preview Changes
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bill Preview Modal */}
+      <AnimatePresence>
+        {showBillPreviewModal && billPreview && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-xl p-6 w-full max-w-md"
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Bill Preview</h2>
+                <button
+                  onClick={() => {
+                    setShowBillPreviewModal(false);
+                    setBillPreview(null);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div className="text-center mb-3">
+                  <h3 className="text-lg font-semibold text-blue-900">
+                    {billPreview.isUpdate ? 'Update' : 'New'} Electricity Bill
+                  </h3>
+                  <p className="text-sm text-blue-700">Room {selectedRoom.roomNumber} - {billPreview.month}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Start Units:</span>
+                    <span className="font-semibold">{billPreview.startUnits}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">End Units:</span>
+                    <span className="font-semibold">{billPreview.endUnits}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-blue-200 pt-2">
+                    <span className="text-gray-600">Consumption:</span>
+                    <span className="font-semibold text-blue-600">{billPreview.consumption} units</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Rate per Unit:</span>
+                    <span className="font-semibold">₹{billPreview.rate}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-blue-200 pt-2">
+                    <span className="text-lg font-semibold text-gray-800">Total Amount:</span>
+                    <span className="text-lg font-bold text-green-600">₹{billPreview.total}</span>
+                  </div>
+                </div>
+
+                {billPreview.isUpdate && (
+                  <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                    ⚠️ This will update the existing bill for {billPreview.month}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBillPreviewModal(false);
+                    setBillPreview(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBillConfirm}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  {billPreview.isUpdate ? 'Update Bill' : 'Save Bill'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Bill Preview Modal */}
+      <AnimatePresence>
+        {showEditBillPreviewModal && editBillPreview && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-xl p-6 w-full max-w-md"
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Update Bill Preview</h2>
+                <button
+                  onClick={() => {
+                    setShowEditBillPreviewModal(false);
+                    setEditBillPreview(null);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <div className="text-center mb-3">
+                  <h3 className="text-lg font-semibold text-yellow-900">
+                    Update Electricity Bill
+                  </h3>
+                  <p className="text-sm text-yellow-700">Room {selectedRoom.roomNumber} - {editBillPreview.month}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Start Units:</span>
+                    <span className="font-semibold">{editBillPreview.startUnits}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">End Units:</span>
+                    <span className="font-semibold">{editBillPreview.endUnits}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-yellow-200 pt-2">
+                    <span className="text-gray-600">Consumption:</span>
+                    <span className="font-semibold text-blue-600">{editBillPreview.consumption} units</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Rate per Unit:</span>
+                    <span className="font-semibold">₹{editBillPreview.rate}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-yellow-200 pt-2">
+                    <span className="text-lg font-semibold text-gray-800">Total Amount:</span>
+                    <span className="text-lg font-bold text-green-600">₹{editBillPreview.total}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-800">
+                  ⚠️ This will update the existing bill for {editBillPreview.month}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditBillPreviewModal(false);
+                    setEditBillPreview(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditBillConfirm}
+                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                >
+                  Update Bill
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default RoomManagement; 

@@ -1,0 +1,577 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useSocket } from '../hooks/useSocket';
+import toast from 'react-hot-toast';
+import api, { safeLocalStorage } from '../utils/axios';
+import LogoutConfirmModal from '../components/LogoutConfirmModal';
+import { removePortalSwitcherElements } from '../components/PortalSwitcher';
+
+const AuthContext = createContext();
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export const AuthProvider = ({ children }) => {
+  // SSO Session Replacement: Clear existing sessions if a new SSO token is detected in URL.
+  // This must run before any state initialization to ensure a completely clean slate.
+  if (typeof window !== 'undefined') {
+    const urlParams = new URLSearchParams(window.location.search);
+    const ssoToken = urlParams.get('token');
+    const crmUrlParam = urlParams.get('crmUrl') || urlParams.get('redirectUrl') || urlParams.get('returnUrl');
+    if (ssoToken) {
+      console.log('SSO Token detected in URL. Clearing existing local sessions to prioritize new login.');
+      safeLocalStorage.removeItem('token');
+      safeLocalStorage.removeItem('user');
+      safeLocalStorage.removeItem('userRole');
+      safeLocalStorage.removeItem('accessToken');
+      safeLocalStorage.removeItem('refreshToken');
+      try {
+        sessionStorage.clear();
+      } catch (e) {
+        // ignore
+      }
+      safeLocalStorage.setItem('loginMethod', 'sso');
+      safeLocalStorage.setItem('isSSO', 'true');
+      if (crmUrlParam && !crmUrlParam.includes('localhost') && !crmUrlParam.includes('127.0.0.1')) {
+        safeLocalStorage.setItem('crmPortalUrl', crmUrlParam);
+      }
+    }
+  }
+
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('token')) return null;
+    }
+    return safeLocalStorage.getItem('token');
+  });
+  const [loading, setLoading] = useState(true);
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
+  const [skipValidation, setSkipValidation] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isSSOUser, setIsSSOUser] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return safeLocalStorage.getItem('loginMethod') === 'sso' || safeLocalStorage.getItem('isSSO') === 'true';
+    }
+    return false;
+  });
+  const socketRef = useSocket(token);
+
+  // Token validation cache - stores last validation timestamp and result
+  const validationCacheRef = React.useRef({
+    timestamp: null,
+    user: null,
+    token: null
+  });
+
+  const VALIDATION_CACHE_TTL = 60 * 1000; // 60 seconds cache
+
+  // iOS/Safari-specific initialization
+  useEffect(() => {
+    // Check if we're on iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const isIOSSafari = isSafari && isIOS;
+    const isIOSChrome = /CriOS/.test(navigator.userAgent);
+
+    if (isIOS || isIOSSafari || isIOSChrome) {
+      console.log('🦁 iOS device detected - applying iOS-specific auth handling');
+
+      // Ensure localStorage is available and working
+      try {
+        const testKey = '_ios_test_';
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        console.log('🦁 iOS localStorage is working');
+      } catch (error) {
+        console.warn('🦁 iOS localStorage test failed:', error);
+        // Fallback to sessionStorage if localStorage fails
+        console.log('🦁 Falling back to sessionStorage for iOS');
+      }
+    }
+  }, []);
+
+  // Handle browser back button for logged-in users
+  useEffect(() => {
+    if (!token || !user) return;
+
+    const handleBeforeUnload = (e) => {
+      // Only show confirmation if user is on a protected route
+      const protectedRoutes = ['/admin', '/student', '/warden', '/principal'];
+      const currentPath = window.location.pathname;
+      const isOnProtectedRoute = protectedRoutes.some(route => currentPath.startsWith(route));
+
+      if (isOnProtectedRoute) {
+        e.preventDefault();
+        e.returnValue = 'Are you sure you want to leave? You will be logged out.';
+        return 'Are you sure you want to leave? You will be logged out.';
+      }
+    };
+
+    const handlePopState = (e) => {
+      // Check if user is trying to go back to login/home page
+      const currentPath = window.location.pathname;
+      const isOnProtectedRoute = ['/admin', '/student', '/warden', '/principal'].some(route =>
+        currentPath.startsWith(route)
+      );
+
+      if (isOnProtectedRoute) {
+        // User is on a protected route, prevent going back to login
+        e.preventDefault();
+
+        // Detect if it's a mobile device
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        if (isMobile) {
+          // On mobile, try to close the browser/tab silently
+          try {
+            // Try multiple methods to close the browser
+            if (window.navigator && window.navigator.app && window.navigator.app.exitApp) {
+              // For Cordova/PhoneGap apps
+              window.navigator.app.exitApp();
+            } else if (window.close) {
+              // Try to close the window (works in some mobile browsers)
+              window.close();
+
+              // Don't show any message on mobile - let it close silently
+            }
+          } catch (error) {
+            console.log('Could not close browser automatically on mobile');
+            // Don't show any error message on mobile
+          }
+        } else {
+          // On desktop, just prevent navigation
+          toast.error('Cannot go back while logged in');
+        }
+
+        // Push current state back to prevent navigation
+        window.history.pushState(null, '', currentPath);
+      }
+    };
+
+    // Add event listeners
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
+
+    // Push current state to prevent back navigation to login
+    const currentPath = window.location.pathname;
+    if (['/admin', '/student', '/warden', '/principal'].some(route => currentPath.startsWith(route))) {
+      // Add an extra history entry to prevent going back to login
+      window.history.pushState(null, '', currentPath);
+      window.history.pushState(null, '', currentPath);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [token, user]);
+
+  // Validate token on mount and token change
+  useEffect(() => {
+    const validateToken = async () => {
+      if (!token) {
+        setLoading(false);
+        setUser(null);
+        validationCacheRef.current = { timestamp: null, user: null, token: null };
+        return;
+      }
+
+      // Check cache first - if token matches and cache is still valid, use cached result
+      const cache = validationCacheRef.current;
+      const now = Date.now();
+      if (
+        cache.token === token &&
+        cache.timestamp &&
+        (now - cache.timestamp) < VALIDATION_CACHE_TTL &&
+        cache.user
+      ) {
+        // Use cached validation result
+        setUser(cache.user);
+        setLoading(false);
+        return;
+      }
+
+      // This flag was causing the validation to be skipped on fresh logins.
+      // We will now validate every time the token is set.
+      if (skipValidation) {
+        setSkipValidation(false);
+      }
+
+      try {
+        const userRole = safeLocalStorage.getItem('userRole');
+
+        let res;
+        if (userRole === 'admin' || userRole === 'super_admin' || userRole === 'sub_admin' || userRole === 'warden' || userRole === 'principal' || userRole === 'custom') {
+          res = await api.get('/api/admin-management/validate');
+        } else {
+          res = await api.get('/api/auth/validate');
+        }
+
+        if (res.data.success && res.data.data?.user) {
+          const freshUser = res.data.data.user;
+          setUser(freshUser);
+
+          // Update cache
+          validationCacheRef.current = {
+            timestamp: Date.now(),
+            user: freshUser,
+            token: token
+          };
+
+          // Update local storage to match validated data using safe localStorage
+          safeLocalStorage.setItem('user', JSON.stringify(freshUser));
+          safeLocalStorage.setItem('userRole', freshUser.role);
+        } else {
+          throw new Error('Invalid token validation response');
+        }
+      } catch (error) {
+        console.error('🔍 Token validation failed:', error.response?.data || error.message);
+
+        // Enhanced iOS error logging for authentication
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const isIOSSafari = isSafari && isIOS;
+        const isIOSChrome = /CriOS/.test(navigator.userAgent);
+
+        if (isIOS || isIOSSafari || isIOSChrome) {
+          console.error('🦁 iOS Authentication Error:', {
+            error: error.message,
+            response: error.response?.data,
+            status: error.response?.status,
+            url: error.config?.url,
+            timestamp: new Date().toISOString(),
+            pathname: window.location.pathname
+          });
+        }
+
+        // Clear invalid token and user data using safe localStorage
+        setToken(null);
+        setUser(null);
+        validationCacheRef.current = { timestamp: null, user: null, token: null };
+        safeLocalStorage.removeItem('token');
+        safeLocalStorage.removeItem('user');
+        safeLocalStorage.removeItem('userRole');
+
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    validateToken();
+  }, [token, skipValidation]); // Added skipValidation back for proper handling
+
+  // Listen for real-time notifications
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handler = (data) => {
+      toast.success(data.title + ': ' + data.message);
+      window.dispatchEvent(new Event('refresh-notifications'));
+    };
+    socket.on('notification', handler);
+    return () => {
+      socket.off('notification', handler);
+    };
+  }, [token]); // Removed socketRef dependency to prevent infinite re-renders in Safari
+
+  // Helper to fetch and set the latest user profile (for students)
+  const fetchAndSetUserProfile = async () => {
+    try {
+      const res = await api.get('/api/students/profile');
+      if (res.data.success && res.data.data) {
+        setUser(res.data.data);
+        safeLocalStorage.setItem('user', JSON.stringify(res.data.data));
+      }
+    } catch (err) {
+      console.error('Failed to fetch user profile:', err);
+    }
+  };
+
+  /**
+   * SSO login: verify external token with backend and establish session.
+   * Same storage and redirect behaviour as login(); does not alter existing login flow.
+   */
+  const loginWithSSOToken = async (encryptedToken) => {
+    const response = await api.post('/api/auth/verify-token', {
+      encryptedToken: encryptedToken
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.message || 'SSO verification failed');
+    }
+    const { token: newToken, student: studentUser, admin: adminUser, requiresPasswordChange } = response.data.data;
+    
+    // Explicitly flag SSO session
+    safeLocalStorage.setItem('loginMethod', 'sso');
+    safeLocalStorage.setItem('isSSO', 'true');
+    setIsSSOUser(true);
+
+    if (adminUser) {
+      safeLocalStorage.setItem('token', newToken);
+      safeLocalStorage.setItem('user', JSON.stringify(adminUser));
+      safeLocalStorage.setItem('userRole', adminUser.role);
+      setSkipValidation(true);
+      setToken(newToken);
+      setUser(adminUser);
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      return { success: true, user: adminUser };
+    }
+    if (studentUser) {
+      safeLocalStorage.setItem('token', newToken);
+      safeLocalStorage.setItem('user', JSON.stringify(studentUser));
+      safeLocalStorage.setItem('userRole', 'student');
+      setSkipValidation(true);
+      setToken(newToken);
+      setUser(studentUser);
+      setRequiresPasswordChange(false);
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      await fetchAndSetUserProfile();
+      return {
+        success: true,
+        user: studentUser,
+        requiresPasswordChange: false
+      };
+    }
+    throw new Error('Invalid SSO response');
+  };
+
+  const login = async (role, credentials) => {
+    try {
+      // Clear SSO flag on standard credentials login
+      safeLocalStorage.removeItem('loginMethod');
+      safeLocalStorage.removeItem('isSSO');
+      safeLocalStorage.removeItem('crmPortalUrl');
+      setIsSSOUser(false);
+
+      let response;
+
+      if (role === 'admin') {
+        console.log('AuthContext: Admin login attempt');
+        // Admin login
+        response = await api.post('/api/admin-management/login', credentials);
+        console.log('AuthContext: Admin login response:', response.data);
+        const { token: newToken, admin } = response.data.data;
+
+        console.log('AuthContext: Token received:', newToken ? 'yes' : 'no');
+        console.log('AuthContext: Admin data received:', admin);
+        console.log('AuthContext: Admin role:', admin.role);
+
+        // Store admin data with the actual role from backend using safe localStorage
+        const tokenStored = safeLocalStorage.setItem('token', newToken);
+        const userStored = safeLocalStorage.setItem('user', JSON.stringify(admin));
+        const roleStored = safeLocalStorage.setItem('userRole', admin.role);
+
+        console.log('AuthContext: Data stored in localStorage:');
+        console.log('AuthContext: - token stored:', tokenStored);
+        console.log('AuthContext: - user stored:', userStored);
+        console.log('AuthContext: - userRole stored:', roleStored);
+
+        // Set skip validation BEFORE setting token to prevent immediate validation
+        setSkipValidation(true);
+
+        // Set user state immediately
+        setToken(newToken);
+        setUser(admin);
+        api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+        console.log('AuthContext: Admin login successful, user set:', admin);
+        console.log('AuthContext: Stored userRole as:', admin.role);
+
+        return { success: true, user: admin };
+      } else {
+        console.log('AuthContext: Student login attempt');
+        // Student login
+        response = await api.post('/api/auth/student/login', credentials);
+        console.log('AuthContext: Student login response:', response.data);
+
+        if (response.data.success) {
+          const { token: newToken, student: studentUser, requiresPasswordChange } = response.data.data;
+
+          // Always set the token and user data to establish a session using safe localStorage
+          const tokenStored = safeLocalStorage.setItem('token', newToken);
+          const userStored = safeLocalStorage.setItem('user', JSON.stringify(studentUser));
+          const roleStored = safeLocalStorage.setItem('userRole', 'student');
+
+          console.log('AuthContext: Student data stored:', { tokenStored, userStored, roleStored });
+
+          setSkipValidation(true);
+          setToken(newToken);
+          setUser(studentUser);
+          api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+          setRequiresPasswordChange(false);
+
+          // Fetch and set the latest profile (populated)
+          await fetchAndSetUserProfile();
+
+          // Return a consistent success object
+          return {
+            success: true,
+            user: studentUser,
+            requiresPasswordChange: false
+          };
+        } else {
+          throw new Error(response.data.message || 'Login failed');
+        }
+      }
+    } catch (error) {
+      console.error('AuthContext: Login error:', error);
+
+      // Enhanced iOS error handling and logging
+      if (isIOS || isIOSSafari || isIOSChrome) {
+        console.error('🦁 iOS Login Error:', {
+          error: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          url: error.config?.url,
+          timestamp: new Date().toISOString(),
+          pathname: window.location.pathname
+        });
+
+        if (error.message.includes('Network Error') || error.code === 'ERR_NETWORK') {
+          throw new Error('Connection issue on iOS. Please check your internet connection and try again.');
+        }
+      }
+
+      throw error;
+    }
+  };
+
+  const logout = (skipConfirm = false) => {
+    if (skipConfirm) {
+      performLogout();
+    } else {
+      setIsLogoutModalOpen(true);
+    }
+  };
+
+  const performLogout = () => {
+    const isSSO = safeLocalStorage.getItem('loginMethod') === 'sso' || safeLocalStorage.getItem('isSSO') === 'true';
+    let crmUrl = safeLocalStorage.getItem('crmPortalUrl') || import.meta.env.VITE_CRM_URL || 'https://crm.pydah.edu.in';
+    if (crmUrl && (crmUrl.includes('localhost') || crmUrl.includes('127.0.0.1'))) {
+      crmUrl = import.meta.env.VITE_CRM_URL || 'https://crm.pydah.edu.in';
+    }
+
+    setIsLoggingOut(true);
+
+    // Destroy and remove Portal Switcher floating widget immediately on logout
+    removePortalSwitcherElements();
+
+    // Clear validation cache on logout
+    validationCacheRef.current = { timestamp: null, user: null, token: null };
+
+    safeLocalStorage.removeItem('token');
+    safeLocalStorage.removeItem('user');
+    safeLocalStorage.removeItem('userRole');
+    safeLocalStorage.removeItem('loginMethod');
+    safeLocalStorage.removeItem('isSSO');
+    safeLocalStorage.removeItem('crmPortalUrl');
+    safeLocalStorage.removeItem('accessToken');
+    safeLocalStorage.removeItem('refreshToken');
+    try {
+      sessionStorage.clear();
+    } catch (e) {
+      // ignore
+    }
+
+    setToken(null);
+    setUser(null);
+    setIsSSOUser(false);
+    setRequiresPasswordChange(false);
+    setSkipValidation(false);
+    delete api.defaults.headers.common['Authorization'];
+
+    setIsLogoutModalOpen(false);
+    setIsLoggingOut(false);
+    toast.success('Logged out successfully');
+
+    if (isSSO && crmUrl) {
+      window.location.href = crmUrl;
+    } else {
+      window.location.href = '/login';
+    }
+  };
+
+  const updateUser = async (updatedUser) => {
+    setUser(updatedUser);
+    safeLocalStorage.setItem('user', JSON.stringify(updatedUser));
+  };
+
+  const hasPermission = (permission) => {
+    if (!user) return false;
+
+    // Super admin has all permissions
+    if (user.role === 'super_admin') return true;
+
+    // Check specific permission
+    return user.permissions?.includes(permission) || false;
+  };
+
+  const isSuperAdmin = () => {
+    return user?.role === 'super_admin';
+  };
+
+  const isAdmin = () => {
+    return user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'sub_admin';
+  };
+
+  const isWarden = () => {
+    return user?.role === 'warden';
+  };
+
+  const isStudent = () => {
+    return user?.role === 'student';
+  };
+
+  const isPrincipal = () => {
+    return user?.role === 'principal';
+  };
+
+  const value = {
+    user,
+    token,
+    loading,
+    login,
+    loginWithSSOToken,
+    logout,
+    confirmLogout: performLogout,
+    isSSOUser,
+    updateUser,
+    hasPermission,
+    isSuperAdmin,
+    isAdmin,
+    isWarden,
+    isStudent,
+    isPrincipal,
+    requiresPasswordChange,
+    setRequiresPasswordChange,
+    isAuthenticated: !!token && !!user
+  };
+
+  let currentCrmUrl = (typeof window !== 'undefined' && safeLocalStorage.getItem('crmPortalUrl'))
+    || import.meta.env.VITE_CRM_URL
+    || 'https://crm.pydah.edu.in';
+  if (currentCrmUrl && (currentCrmUrl.includes('localhost') || currentCrmUrl.includes('127.0.0.1'))) {
+    currentCrmUrl = import.meta.env.VITE_CRM_URL || 'https://crm.pydah.edu.in';
+  }
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={performLogout}
+        isSSO={isSSOUser}
+        loading={isLoggingOut}
+        crmUrl={currentCrmUrl}
+      />
+    </AuthContext.Provider>
+  );
+};

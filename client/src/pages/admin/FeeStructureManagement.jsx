@@ -1,0 +1,1619 @@
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import toast from 'react-hot-toast';
+import api from '../../utils/axios';
+import { useCoursesBranches } from '../../context/CoursesBranchesContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import {
+  PlusIcon,
+  TrashIcon,
+  AcademicCapIcon,
+  UserGroupIcon,
+  BuildingOfficeIcon,
+  Cog6ToothIcon,
+  XMarkIcon,
+  FunnelIcon,
+  ArrowPathIcon,
+} from '@heroicons/react/24/outline';
+
+const extractAdditionalYearsFromMetadata = (metadata) => {
+  if (!metadata) return [];
+
+  const visit = (value, fieldName = '') => {
+    if (Array.isArray(value)) {
+      return value.flatMap(item => visit(item, fieldName));
+    }
+
+    if (value && typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, item]) => (
+        visit(item, `${fieldName} ${key}`)
+      ));
+    }
+
+    const normalizedFieldName = fieldName.replace(/[_\s-]+/g, '').toLowerCase();
+    if (!/additionalyears?$/.test(normalizedFieldName)) {
+      return [];
+    }
+
+    const normalizedValue = typeof value === 'number'
+      ? String(value)
+      : typeof value === 'string'
+        ? value.trim()
+        : '';
+    return /^\d+(?:-\d{4})?$/.test(normalizedValue) ? [normalizedValue] : [];
+  };
+
+  const metadataValue = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+  return [...new Set(visit(metadataValue))];
+};
+
+const academicYearOptions = () => {
+  const current = new Date().getFullYear();
+  const list = [];
+  for (let i = -2; i <= 2; i += 1) {
+    const year = current + i;
+    list.push(`${year}-${year + 1}`);
+  }
+  return list;
+};
+
+const FeeStructureManagement = () => {
+  const { courses = [], branches = [] } = useCoursesBranches();
+
+  const [hostels, setHostels] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('structure'); // structure | additional
+  const [showModal, setShowModal] = useState(false);
+  const [selectedStructure, setSelectedStructure] = useState(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [matrixAmounts, setMatrixAmounts] = useState({});
+  const [matrixLoading, setMatrixLoading] = useState(false);
+
+  // Additional Fees state (mirrors Fee Management page behaviour)
+  const [additionalFees, setAdditionalFees] = useState({});
+  const [additionalFeesLoading, setAdditionalFeesLoading] = useState(false);
+  const [cautionFeeHead, setCautionFeeHead] = useState(null);
+  const [showAdditionalFeeModal, setShowAdditionalFeeModal] = useState(false);
+  const [selectedAdditionalFee, setSelectedAdditionalFee] = useState(null);
+  const [availableCategories, setAvailableCategories] = useState([]); // fetched from API
+  const [additionalFeeForm, setAdditionalFeeForm] = useState({
+    feeType: '',
+    amount: 0,
+    description: '',
+    isActive: true,
+    categories: [],
+    categoryAmounts: {},
+  });
+  const [additionalFeesFilter, setAdditionalFeesFilter] = useState({
+    academicYear: academicYearOptions()[2],
+  });
+  const [additionalHostelId, setAdditionalHostelId] = useState('');
+  const [additionalCategories, setAdditionalCategories] = useState([]);
+
+  const [filters, setFilters] = useState({
+    academicYear: academicYearOptions()[2],
+    course: '',
+    year: '',
+    hostelId: '',
+    categoryId: '',
+  });
+
+  const [form, setForm] = useState({
+    academicYear: academicYearOptions()[2],
+    course: '',
+    year: '',
+    hostelId: '',
+    categoryId: '',
+    amount: '',
+  });
+
+  const [rows, setRows] = useState([]);
+
+  const loadHostels = async () => {
+    try {
+      const res = await api.get('/api/hostels');
+      if (res.data.success) {
+        const payload =
+          res.data.data ||
+          res.data.hostels ||
+          res.data.data?.hostels ||
+          [];
+        setHostels(Array.isArray(payload) ? payload : []);
+        // Preselect first hostel for additional fees if not already selected
+        const firstHostelId = Array.isArray(payload) && payload.length > 0 ? payload[0]._id : '';
+        if (!additionalHostelId && firstHostelId) {
+          setAdditionalHostelId(firstHostelId);
+          loadAdditionalCategories(firstHostelId);
+        }
+      } else {
+        setHostels([]);
+      }
+    } catch (err) {
+      console.error('Error loading hostels', err);
+      toast.error('Failed to load hostels');
+    }
+  };
+
+  const loadCategories = async (hostelId) => {
+    if (!hostelId) {
+      setCategories([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/api/hostels/${hostelId}/categories`);
+      if (res.data.success) {
+        const payload =
+          res.data.data ||
+          res.data.categories ||
+          res.data.data?.categories ||
+          [];
+        setCategories(Array.isArray(payload) ? payload : []);
+      } else {
+        setCategories([]);
+      }
+    } catch (err) {
+      console.error('Error loading categories', err);
+      toast.error('Failed to load categories');
+    }
+  };
+
+  const fetchRows = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/api/admin/fee-structures', { params: filters });
+      if (res.data.success) {
+        setRows(res.data.data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching fee structures', err);
+      toast.error(err.response?.data?.message || 'Failed to fetch fee structures');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHostels();
+  }, []);
+
+  useEffect(() => {
+    fetchRows();
+  }, [filters.academicYear, filters.course, filters.year, filters.hostelId, filters.categoryId]);
+
+  useEffect(() => {
+    if (form.hostelId) {
+      loadCategories(form.hostelId);
+    } else {
+      setCategories([]);
+    }
+  }, [form.hostelId]);
+
+  // Fetch additional fees for the selected academic year
+  const fetchAdditionalFees = useCallback(async () => {
+    if (!additionalFeesFilter.academicYear) {
+      setAdditionalFees({});
+      setCautionFeeHead(null);
+      return;
+    }
+    // Require hostel to scope additional fees; if not selected, clear and return
+    if (!additionalHostelId) {
+      setAdditionalFees({});
+      setCautionFeeHead(null);
+      return;
+    }
+    try {
+      setAdditionalFeesLoading(true);
+      const res = await api.get(`/api/admin/fee-structures/additional-fees/${additionalFeesFilter.academicYear}`, {
+        params: { hostelId: additionalHostelId },
+      });
+      if (res.data.success) {
+        const data = res.data.data || {};
+        // Attach hostelId for UI clarity
+        const withHostel = {};
+        Object.keys(data).forEach((key) => {
+          withHostel[key] = { ...data[key], hostelId: additionalHostelId };
+        });
+        setAdditionalFees(withHostel);
+        setCautionFeeHead(res.data.cautionFeeHead || null);
+      } else {
+        setAdditionalFees({});
+        setCautionFeeHead(null);
+      }
+    } catch (err) {
+      console.error('Error fetching additional fees', err);
+      setAdditionalFees({});
+      setCautionFeeHead(null);
+    } finally {
+      setAdditionalFeesLoading(false);
+    }
+  }, [additionalFeesFilter.academicYear, additionalHostelId]);
+
+  useEffect(() => {
+    if (activeTab === 'additional') {
+      fetchAdditionalFees();
+    }
+  }, [activeTab, additionalFeesFilter.academicYear, additionalHostelId, fetchAdditionalFees]);
+
+  const getAvailableYearsForCourse = useCallback((courseName) => {
+    if (!courseName) return [];
+    const course = courses.find(
+      c => c.name === courseName || c._id === courseName
+    );
+    if (!course) return [];
+
+    const durationYears = Array.from({ length: course.duration || 4 }, (_, i) => i + 1);
+    const metadataYears = branches
+      .filter(branch => {
+        const branchCourse = branch.course;
+        return branchCourse === course._id
+          || (typeof branchCourse === 'object' && branchCourse._id === course._id);
+      })
+      .flatMap(branch => extractAdditionalYearsFromMetadata(branch.metadata))
+      .filter((year, index, years) => years.indexOf(year) === index);
+
+    return [...new Set([...durationYears.map(String), ...metadataYears])];
+  }, [branches, courses]);
+
+  useEffect(() => {
+    const loadFeeMatrix = async () => {
+      if (!showModal || !form.academicYear || !form.course || !form.hostelId || categories.length === 0) {
+        setMatrixAmounts({});
+        return;
+      }
+
+      const years = getAvailableYearsForCourse(form.course);
+      const blankMatrix = {};
+      years.forEach((year) => {
+        categories.forEach((category) => {
+          blankMatrix[`${year}:${category._id}`] = '';
+        });
+      });
+
+      setMatrixLoading(true);
+      try {
+        const res = await api.get('/api/admin/fee-structures', {
+          params: {
+            academicYear: form.academicYear,
+            course: form.course,
+            hostelId: form.hostelId,
+            feeType: 'Hostel Fee',
+          },
+        });
+        const nextMatrix = { ...blankMatrix };
+        (res.data.data || []).forEach((row) => {
+          const categoryId = row.categoryId?._id || row.categoryId;
+          const key = `${row.year}:${categoryId}`;
+          if (Object.prototype.hasOwnProperty.call(nextMatrix, key)) {
+            nextMatrix[key] = String(row.amount ?? '');
+          }
+        });
+        setMatrixAmounts(nextMatrix);
+      } catch (err) {
+        console.error('Error loading fee structure matrix', err);
+        setMatrixAmounts(blankMatrix);
+        toast.error(err.response?.data?.message || 'Failed to load existing fee values');
+      } finally {
+        setMatrixLoading(false);
+      }
+    };
+
+    loadFeeMatrix();
+  }, [
+    showModal,
+    form.academicYear,
+    form.course,
+    form.hostelId,
+    categories,
+    getAvailableYearsForCourse,
+  ]);
+
+  const getCourseLabel = useCallback((courseValue) => {
+    if (!courseValue) return '-';
+    const match = courses.find(
+      c => c.name === courseValue || c._id === courseValue
+    );
+    return match?.name || courseValue;
+  }, [courses]);
+
+  const getCourseOptionLabel = useCallback((course) => {
+    const courseName = course.name || course.code || 'Course';
+    const collegeName = course.college?.name || course.collegeName;
+    const duplicateCourseNames = courses.filter(
+      item => (item.name || '').trim().toLowerCase() === courseName.trim().toLowerCase()
+    ).length;
+
+    return duplicateCourseNames > 1 && collegeName
+      ? `${courseName} (${collegeName})`
+      : courseName;
+  }, [courses]);
+
+  const getAdditionalYearsForCourse = useCallback((courseName) => {
+    if (!courseName) return {};
+
+    const selectedCourse = courses.find(
+      course => course.name === courseName || course._id === courseName
+    );
+    const selectedCourseId = selectedCourse?._id;
+    const selectedCourseName = selectedCourse?.name || selectedCourse?.courseName;
+    const matchingBranches = branches.filter(branch => {
+      if (!selectedCourseId) return false;
+      const branchCourse = branch.course;
+      return branchCourse === selectedCourseId
+        || (typeof branchCourse === 'object' && (
+          branchCourse._id === selectedCourseId
+          || branchCourse.name === selectedCourseName
+          || branchCourse.code === selectedCourse?.code
+        ));
+    });
+
+    return matchingBranches.reduce((groups, branch) => {
+      const normalizedYears = Array.isArray(branch.additionalYears)
+        ? branch.additionalYears
+        : extractAdditionalYearsFromMetadata(branch.metadata);
+      normalizedYears.forEach((year) => {
+        if (!groups[year]) groups[year] = [];
+        if (!groups[year].includes(branch.name)) groups[year].push(branch.name);
+      });
+      return groups;
+    }, {});
+  }, [branches, courses]);
+
+  const additionalYearsForCourse = getAdditionalYearsForCourse(form.course);
+
+  // Additional Fees helpers
+  const openAdditionalFeeModal = (feeType = null) => {
+    // Ensure a hostel is selected; fallback to first hostel
+    if (!additionalHostelId && hostels.length > 0) {
+      const firstId = hostels[0]._id;
+      setAdditionalHostelId(firstId);
+      loadAdditionalCategories(firstId);
+    }
+
+    if (feeType && additionalFees[feeType]) {
+      const feeData = additionalFees[feeType];
+      const categoryAmounts = {};
+      if (feeData.categoryAmounts && typeof feeData.categoryAmounts === 'object') {
+        Object.keys(feeData.categoryAmounts).forEach((cat) => {
+          categoryAmounts[cat] = feeData.categoryAmounts[cat] || 0;
+        });
+      } else if (feeData.amount !== undefined) {
+        const cats = Array.isArray(feeData.categories) && feeData.categories.length > 0 ? feeData.categories : additionalCategories;
+        cats.forEach((cat) => { categoryAmounts[cat] = feeData.amount || 0; });
+      }
+      setSelectedAdditionalFee(feeType);
+      setAdditionalFeeForm({
+        feeType,
+        amount: feeData.amount || 0,
+        description: feeData.description || '',
+        isActive: feeData.isActive !== undefined ? feeData.isActive : true,
+        categories: Array.isArray(feeData.categories) && feeData.categories.length > 0 ? feeData.categories : additionalCategories,
+        categoryAmounts,
+      });
+    } else {
+      setSelectedAdditionalFee(null);
+      setAdditionalFeeForm({
+        feeType: 'caution_deposit',
+        amount: 0,
+        description: 'Caution Deposit',
+        isActive: true,
+        categories: additionalCategories,
+        categoryAmounts: {},
+      });
+    }
+    setShowAdditionalFeeModal(true);
+  };
+
+  const handleAdditionalFeeSubmit = async (e) => {
+    e.preventDefault();
+    if (!additionalFeesFilter.academicYear) {
+      toast.error('Please select an academic year');
+      return;
+    }
+    if (!additionalHostelId) {
+      toast.error('Please select a hostel to load categories');
+      return;
+    }
+    if (!additionalFeeForm.feeType || !additionalFeeForm.feeType.trim()) {
+      toast.error('Please enter a fee type name');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(additionalFeeForm.feeType.trim()) || additionalFeeForm.feeType.trim().length > 50) {
+      toast.error('Fee type name must be alphanumeric with underscores only, max 50 characters');
+      return;
+    }
+
+    const categoryAmounts = {};
+    let hasValidAmount = false;
+    (additionalFeeForm.categories || []).forEach((cat) => {
+      const amount = Number(additionalFeeForm.categoryAmounts?.[cat]) || 0;
+      if (amount < 0) {
+        toast.error(`Amount for category ${cat} must be non-negative`);
+        return;
+      }
+      if (amount > 0) hasValidAmount = true;
+      categoryAmounts[cat] = amount;
+    });
+
+    if (!additionalFeeForm.categories || additionalFeeForm.categories.length === 0) {
+      toast.error('Please select at least one category');
+      return;
+    }
+    if (!hasValidAmount) {
+      toast.error('Enter at least one amount greater than 0');
+      return;
+    }
+
+    try {
+      setAdditionalFeesLoading(true);
+      const updatedAdditionalFees = { ...additionalFees };
+      if (selectedAdditionalFee && selectedAdditionalFee !== additionalFeeForm.feeType.trim()) {
+        delete updatedAdditionalFees[selectedAdditionalFee];
+      }
+
+      const amounts = Object.values(categoryAmounts).filter((amt) => amt > 0);
+      const averageAmount = amounts.length > 0 ? (amounts.reduce((sum, a) => sum + a, 0) / amounts.length) : 0;
+
+      updatedAdditionalFees[additionalFeeForm.feeType.trim()] = {
+        categoryAmounts,
+        amount: averageAmount,
+        description: additionalFeeForm.description || '',
+        isActive: additionalFeeForm.isActive !== undefined ? additionalFeeForm.isActive : true,
+        categories: Array.isArray(additionalFeeForm.categories) && additionalFeeForm.categories.length > 0
+          ? additionalFeeForm.categories
+          : additionalCategories,
+      };
+
+      const res = await api.post('/api/admin/fee-structures/additional-fees', {
+        academicYear: additionalFeesFilter.academicYear,
+        additionalFees: updatedAdditionalFees,
+        hostelId: additionalHostelId,
+      });
+
+      if (res.data.success) {
+        toast.success(`Additional fee ${selectedAdditionalFee ? 'updated' : 'created'} successfully`);
+        setAdditionalFees(updatedAdditionalFees);
+        setShowAdditionalFeeModal(false);
+        setSelectedAdditionalFee(null);
+        setAdditionalFeeForm({
+          feeType: '',
+          amount: 0,
+          description: '',
+          isActive: true,
+          categories: additionalCategories,
+          categoryAmounts: {},
+        });
+      } else {
+        toast.error(res.data.message || 'Failed to save additional fee');
+      }
+    } catch (err) {
+      console.error('Error saving additional fee', err);
+      toast.error(err.response?.data?.message || 'Failed to save additional fee');
+    } finally {
+      setAdditionalFeesLoading(false);
+    }
+  };
+
+  const deleteAdditionalFee = async (feeType) => {
+    if (!window.confirm(`Delete additional fee "${feeType}"?`)) return;
+    try {
+      setAdditionalFeesLoading(true);
+      const updatedAdditionalFees = { ...additionalFees };
+      delete updatedAdditionalFees[feeType];
+      const res = await api.post('/api/admin/fee-structures/additional-fees', {
+        academicYear: additionalFeesFilter.academicYear,
+        additionalFees: updatedAdditionalFees,
+        hostelId: additionalHostelId,
+      });
+      if (res.data.success) {
+        toast.success('Additional fee deleted');
+        setAdditionalFees(updatedAdditionalFees);
+      } else {
+        toast.error(res.data.message || 'Failed to delete additional fee');
+      }
+    } catch (err) {
+      console.error('Error deleting additional fee', err);
+      toast.error(err.response?.data?.message || 'Failed to delete additional fee');
+    } finally {
+      setAdditionalFeesLoading(false);
+    }
+  };
+
+  const toggleAdditionalFeeStatus = async (feeType) => {
+    try {
+      setAdditionalFeesLoading(true);
+      const updatedAdditionalFees = { ...additionalFees };
+      if (updatedAdditionalFees[feeType]) {
+        updatedAdditionalFees[feeType] = {
+          ...updatedAdditionalFees[feeType],
+          isActive: !updatedAdditionalFees[feeType].isActive,
+        };
+      }
+      const res = await api.post('/api/admin/fee-structures/additional-fees', {
+        academicYear: additionalFeesFilter.academicYear,
+        additionalFees: updatedAdditionalFees,
+        hostelId: additionalHostelId,
+      });
+      if (res.data.success) {
+        toast.success(`Additional fee ${updatedAdditionalFees[feeType].isActive ? 'activated' : 'deactivated'} successfully`);
+        setAdditionalFees(updatedAdditionalFees);
+      } else {
+        toast.error(res.data.message || 'Failed to update additional fee');
+      }
+    } catch (err) {
+      console.error('Error toggling additional fee status', err);
+      toast.error(err.response?.data?.message || 'Failed to update additional fee');
+    } finally {
+      setAdditionalFeesLoading(false);
+    }
+  };
+
+  // Fetch available categories for additional fees based on selected hostel
+  const loadAdditionalCategories = useCallback(async (hostelId) => {
+    if (!hostelId) {
+      setAdditionalCategories([]);
+      setAvailableCategories([]);
+      setAdditionalFeeForm((prev) => ({ ...prev, categories: [], categoryAmounts: {} }));
+      return;
+    }
+    try {
+      const res = await api.get(`/api/hostels/${hostelId}/categories`);
+      if (res.data.success) {
+        const payload =
+          res.data.data ||
+          res.data.categories ||
+          res.data.data?.categories ||
+          [];
+        const cats = Array.isArray(payload) ? payload : [];
+        const catNames = cats
+          .map((c) => (typeof c === 'string' ? c : c?.name))
+          .filter(Boolean);
+        setAdditionalCategories(catNames);
+        setAvailableCategories(catNames);
+        setAdditionalFeeForm((prev) => ({
+          ...prev,
+          categories: catNames,
+          categoryAmounts: {},
+        }));
+      } else {
+        setAdditionalCategories([]);
+        setAvailableCategories([]);
+        setAdditionalFeeForm((prev) => ({ ...prev, categories: [], categoryAmounts: {} }));
+      }
+    } catch (err) {
+      console.error('Error fetching categories', err);
+      setAdditionalCategories([]);
+      setAvailableCategories([]);
+      setAdditionalFeeForm((prev) => ({ ...prev, categories: [], categoryAmounts: {} }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (additionalHostelId) {
+      loadAdditionalCategories(additionalHostelId);
+    } else {
+      setAdditionalCategories([]);
+      setAvailableCategories([]);
+      setAdditionalFeeForm((prev) => ({ ...prev, categories: [], categoryAmounts: {} }));
+    }
+  }, [additionalHostelId, loadAdditionalCategories]);
+
+  const resetForm = () => {
+    setForm({
+      academicYear: filters.academicYear,
+      course: '',
+      branch: '',
+      year: '',
+      hostelId: '',
+      categoryId: '',
+      amount: '',
+    });
+    setSelectedStructure(null);
+    setIsEditMode(false);
+    setMatrixAmounts({});
+    setCategories([]);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    const configuredYears = getAvailableYearsForCourse(form.course);
+    if (!form.academicYear || !form.course || !form.hostelId) {
+      toast.error('Academic year, course, and hostel are required');
+      return;
+    }
+    if (configuredYears.length === 0 || categories.length === 0) {
+      toast.error('The selected course must have configured years and the hostel must have categories');
+      return;
+    }
+
+    const entries = [];
+    for (const year of configuredYears) {
+      for (const category of categories) {
+        const value = matrixAmounts[`${year}:${category._id}`];
+        if (value === '' || value === undefined || value === null) {
+          toast.error(`Enter the fee for Year ${year} / ${category.name}`);
+          return;
+        }
+        const amount = Number(value);
+        if (!Number.isFinite(amount) || amount < 0) {
+          toast.error(`Enter a valid fee for Year ${year} / ${category.name}`);
+          return;
+        }
+        entries.push({ year, categoryId: category._id, amount });
+      }
+    }
+
+    setSaving(true);
+    try {
+      const response = await api.post('/api/admin/fee-structures/bulk', {
+        academicYear: form.academicYear,
+        course: form.course,
+        hostelId: form.hostelId,
+        feeType: 'Hostel Fee',
+        entries,
+      });
+
+      if (response.data.success) {
+        toast.success(`Saved all ${entries.length} year/category fee values`);
+        resetForm();
+        setShowModal(false);
+        fetchRows();
+      } else {
+        toast.error(response.data.message || 'Failed to save fee structure matrix');
+      }
+    } catch (err) {
+      console.error('Error saving fee structure matrix', err);
+      toast.error(err.response?.data?.message || 'Failed to save fee structure matrix');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = (row) => {
+    setSelectedStructure(row);
+    setIsEditMode(true);
+    const hostelId = typeof row.hostelId === 'object' ? row.hostelId?._id : row.hostelId;
+    const courseLabel = getCourseLabel(row.course) === '-' ? (row.course || '') : getCourseLabel(row.course);
+    const branchOption = branches.find(branch => branch.name === row.branch);
+    setForm({
+      academicYear: row.academicYear || '',
+      course: courseLabel,
+      branch: branchOption ? branchOption._id : row.branch || '',
+      hostelId: hostelId || '',
+      year: '',
+      categoryId: '',
+      amount: '',
+    });
+    if (hostelId) {
+      loadCategories(hostelId);
+    }
+    setShowModal(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this fee rule?')) return;
+    try {
+      const res = await api.delete(`/api/admin/fee-structures/${id}`);
+      if (res.data.success) {
+        toast.success('Fee rule deleted');
+        fetchRows();
+      }
+    } catch (err) {
+      console.error('Error deleting fee rule', err);
+      toast.error(err.response?.data?.message || 'Failed to delete fee rule');
+    }
+  };
+
+  const openModal = (structure = null) => {
+    if (structure) {
+      handleEdit(structure);
+    } else {
+      resetForm();
+      setShowModal(true);
+    }
+  };
+
+  const handleFilterChange = (key, value) => {
+    setFilters((prev) => {
+      const updated = { ...prev, [key]: value };
+      if (key === 'hostelId') {
+        updated.categoryId = '';
+      }
+      return updated;
+    });
+  };
+
+  // Group structures by academic year, course, year, hostel, and fee type (consolidating categories)
+  const groupedStructures = useMemo(() => {
+    const groups = {};
+    rows.forEach((row) => {
+      const hostelIdVal = row.hostelId?._id || row.hostelId || 'all';
+      const hostelName = row.hostelId?.name || 'All Hostels';
+      const key = `${row.academicYear}-${row.course}-${row.year}-${hostelIdVal}-${row.feeType}`;
+      if (!groups[key]) {
+        groups[key] = {
+          academicYear: row.academicYear,
+          course: row.course,
+          year: row.year,
+          hostelId: row.hostelId,
+          hostelName: hostelName,
+          feeType: row.feeType,
+          categories: [],
+        };
+      }
+      groups[key].categories.push({
+        categoryId: row.categoryId?._id || row.categoryId || null,
+        categoryName: row.categoryId?.name || 'All Categories',
+        amount: row.amount,
+        _id: row._id,
+        rawRow: row,
+      });
+    });
+
+    const result = Object.values(groups);
+    // Sort categories within each group to ensure uniform ordering
+    result.forEach((group) => {
+      group.categories.sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+    });
+    return result;
+  }, [rows]);
+
+  const renderStructureTab = () => (
+    <>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3 sm:p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3">
+          <h2 className="text-base sm:text-lg font-semibold text-gray-900">Fee Structure Management</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => openModal()}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
+              disabled={courses.length === 0}
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Add Fee Structure</span>
+              <span className="sm:hidden">Add</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Academic Year
+              </label>
+              <select
+                value={filters.academicYear}
+                onChange={(e) => handleFilterChange('academicYear', e.target.value)}
+                className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                {academicYearOptions().map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Course
+              </label>
+              <select
+                value={filters.course}
+                onChange={(e) => handleFilterChange('course', e.target.value)}
+                className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                <option value="">All Courses</option>
+                {courses?.map((c) => (
+                  <option key={c._id || c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Year
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={filters.year}
+                onChange={(e) => handleFilterChange('year', e.target.value)}
+                className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                placeholder="Year"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Hostel
+              </label>
+              <select
+                value={filters.hostelId}
+                onChange={(e) => handleFilterChange('hostelId', e.target.value)}
+                className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                <option value="">All Hostels</option>
+                {hostels.map((h) => (
+                  <option key={h._id} value={h._id}>{h.name}</option>
+                ))}
+              </select>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Filter Summary and Clear Button */}
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="text-xs sm:text-sm text-gray-600">
+            Showing {rows.length} fee rule{rows.length !== 1 ? 's' : ''}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setFilters({
+                  academicYear: academicYearOptions()[2],
+                  course: '',
+                  year: '',
+                  hostelId: '',
+                  categoryId: '',
+                });
+              }}
+              className="px-3 py-1.5 sm:py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 text-xs sm:text-sm flex items-center gap-1"
+            >
+              <FunnelIcon className="w-4 h-4" />
+              Clear Filters
+            </button>
+            <button
+              onClick={fetchRows}
+              className="px-3 py-1.5 sm:py-2 text-blue-600 hover:text-blue-800 border border-blue-300 rounded-lg hover:bg-blue-50 text-xs sm:text-sm flex items-center gap-1"
+            >
+              <ArrowPathIcon className="w-4 h-4" />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="flex justify-center items-center py-12">
+              <LoadingSpinner />
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="text-center py-12">
+              <Cog6ToothIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+              <p className="text-gray-500">No fee structures found matching the current filters</p>
+              <p className="text-sm text-gray-400 mt-2">
+                Try adjusting your filters or create new fee structures.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden lg:block">
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-r border-gray-200">
+                          Academic Year
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-r border-gray-200">
+                          Course
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-r border-gray-200">
+                          Year
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-r border-gray-200">
+                          Hostel
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                          Category Prices
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {groupedStructures.map((group) => {
+                        const groupKey = `${group.academicYear}-${group.course}-${group.year}-${group.hostelId?._id || group.hostelId || 'all'}-${group.feeType}`;
+                        return (
+                          <tr key={groupKey} className="hover:bg-gray-50 transition-colors duration-150">
+                            <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-r border-gray-200">
+                              <div className="flex items-center">
+                                <AcademicCapIcon className="w-4 h-4 text-blue-500 mr-2" />
+                                {group.academicYear}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-r border-gray-200">
+                              <div className="flex items-center">
+                                <UserGroupIcon className="w-4 h-4 text-green-500 mr-2" />
+                                {getCourseLabel(group.course)}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-r border-gray-200">
+                              <div className="flex items-center justify-center">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  Year {group.year}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700 border-r border-gray-200">
+                              {group.hostelId?.name || 'All Hostels'}
+                            </td>
+                            <td className="px-4 py-4 text-sm text-gray-700">
+                              <div className="flex flex-wrap gap-2">
+                                {group.categories.map((cat) => (
+                                  <div
+                                    key={cat._id}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/50 hover:bg-indigo-50 transition-colors duration-150 shadow-sm"
+                                  >
+                                    <span className="text-xs font-semibold text-indigo-950">
+                                      {cat.categoryName === 'A+' ? 'A+ (AC)' : cat.categoryName === 'B+' ? 'B+ (AC)' : cat.categoryName}
+                                    </span>
+                                    <span className="text-sm font-bold text-green-700">
+                                      ₹{cat.amount?.toLocaleString() || 0}
+                                    </span>
+                                    <div className="flex items-center gap-1 ml-1 pl-1.5 border-l border-indigo-200">
+                                      <button
+                                        onClick={() => openModal(cat.rawRow)}
+                                        className="text-blue-600 hover:text-blue-900 p-0.5 rounded hover:bg-blue-100 transition-colors duration-150"
+                                        title="Edit"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        onClick={() => handleDelete(cat._id)}
+                                        className="text-red-600 hover:text-red-900 p-0.5 rounded hover:bg-red-100 transition-colors duration-150"
+                                        title="Delete"
+                                      >
+                                        <TrashIcon className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="lg:hidden space-y-4">
+                {groupedStructures.map((group) => {
+                  const groupKey = `${group.academicYear}-${group.course}-${group.year}-${group.hostelId?._id || group.hostelId || 'all'}-${group.feeType}`;
+                  return (
+                    <div
+                      key={groupKey}
+                      className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center">
+                            <AcademicCapIcon className="w-4 h-4 text-blue-500 mr-2" />
+                            <span className="text-sm font-semibold text-gray-900">{group.academicYear}</span>
+                          </div>
+                          <div className="flex items-center">
+                            <UserGroupIcon className="w-4 h-4 text-green-500 mr-2" />
+                            <span className="text-sm font-medium text-gray-700">{getCourseLabel(group.course)}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 pl-6">
+                            Hostel: <span className="font-semibold text-gray-700">{group.hostelId?.name || 'All Hostels'}</span>
+                          </div>
+                        </div>
+                        <div className="mt-2 sm:mt-0">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                            Year {group.year}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Category Prices</div>
+                        <div className="flex flex-wrap gap-2">
+                          {group.categories.map((cat) => (
+                            <div
+                              key={cat._id}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/50 hover:bg-indigo-50 transition-colors duration-150 shadow-sm"
+                            >
+                              <span className="text-xs font-semibold text-indigo-950">
+                                {cat.categoryName === 'A+' ? 'A+ (AC)' : cat.categoryName === 'B+' ? 'B+ (AC)' : cat.categoryName}
+                              </span>
+                              <span className="text-sm font-bold text-green-700">
+                                ₹{cat.amount?.toLocaleString() || 0}
+                              </span>
+                              <div className="flex items-center gap-1 ml-1 pl-1.5 border-l border-indigo-200">
+                                <button
+                                  onClick={() => openModal(cat.rawRow)}
+                                  className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-100 transition-colors duration-150"
+                                  title="Edit"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(cat._id)}
+                                  className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-100 transition-colors duration-150"
+                                  title="Delete"
+                                >
+                                  <TrashIcon className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+
+          )}
+        </div>
+      </div>
+
+      {/* Fee Structure Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {isEditMode ? 'Edit Fee Structure' : 'Add Fee Structure'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowModal(false);
+                  resetForm();
+                }}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSave}>
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Academic Year
+                    </label>
+                    <select
+                      value={form.academicYear}
+                      onChange={(e) => setForm((p) => ({ ...p, academicYear: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      {academicYearOptions().map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Course (SQL)
+                    </label>
+                    <select
+                      value={form.course}
+                      onChange={(e) => setForm((p) => ({ ...p, course: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      <option value="">Select Course</option>
+                      {courses?.map((course) => (
+                        <option key={course._id || course.name} value={course.name}>
+                          {getCourseOptionLabel(course)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Hostel
+                    </label>
+                    <select
+                      value={form.hostelId}
+                      onChange={(e) => setForm((p) => ({ ...p, hostelId: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      required
+                    >
+                      <option value="">Select Hostel</option>
+                      {hostels.map((h) => (
+                        <option key={h._id} value={h._id}>{h.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <AcademicCapIcon className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
+                    <p className="text-sm text-blue-800">
+                      Select a course and hostel. The configured course years appear as rows and
+                      every hostel category appears as a column. All values are saved together.
+                    </p>
+                  </div>
+                </div>
+
+                {form.course && form.hostelId ? (
+                  matrixLoading ? (
+                    <div className="py-10 flex justify-center"><LoadingSpinner /></div>
+                  ) : categories.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-amber-700 bg-amber-50 rounded-lg border border-amber-200">
+                      No categories are configured for the selected hostel.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                              Course Year
+                            </th>
+                            {categories.map((category) => (
+                              <th key={category._id} className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider min-w-[150px]">
+                                {category.name === 'A+' ? 'A+ (AC)' : category.name === 'B+' ? 'B+ (AC)' : category.name}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {getAvailableYearsForCourse(form.course).map((year) => {
+                            const branchNames = additionalYearsForCourse[year] || [];
+                            return (
+                              <tr key={year}>
+                                <th className="sticky left-0 bg-white px-4 py-3 text-left text-sm font-semibold text-gray-900">
+                                  <span>Year {year}</span>
+                                  {branchNames.length > 0 && (
+                                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                                      Additional · {branchNames.join(', ')}
+                                    </span>
+                                  )}
+                                </th>
+                                {categories.map((category) => {
+                                  const key = `${year}:${category._id}`;
+                                  return (
+                                    <td key={category._id} className="px-3 py-2">
+                                    <div className="relative">
+                                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 text-sm">₹</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={matrixAmounts[key] ?? ''}
+                                        onChange={(e) => setMatrixAmounts((prev) => ({
+                                          ...prev,
+                                          [key]: e.target.value,
+                                        }))}
+                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="0"
+                                        aria-label={`Year ${year}, category ${category.name}`}
+                                        required
+                                      />
+                                    </div>
+                                  </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                ) : (
+                  <div className="py-8 text-center text-sm text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                    Select a course and hostel to display the fee matrix.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving All...' : 'Save All Fee Values'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const renderAdditionalTab = () => (
+    <>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3 sm:p-6 mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3">
+          <div>
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">Caution Deposit Setup</h2>
+            <p className="text-xs sm:text-sm text-gray-500 mt-1">
+              Configure the caution deposit per academic year with category-specific amounts.
+              {cautionFeeHead && (
+                <span className="block mt-1 text-blue-600 font-semibold">
+                  🔗 Mapped to Fee Head: {cautionFeeHead.name} ({cautionFeeHead.code})
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => openAdditionalFeeModal()}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm sm:text-base"
+              disabled={!additionalFeesFilter.academicYear}
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Configure Caution Deposit</span>
+              <span className="sm:hidden">Configure</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Academic Year
+              </label>
+              <select
+                value={additionalFeesFilter.academicYear}
+                onChange={(e) => setAdditionalFeesFilter((p) => ({ ...p, academicYear: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                {academicYearOptions().map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Hostel
+              </label>
+              <select
+                value={additionalHostelId}
+                onChange={(e) => setAdditionalHostelId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                <option value="">Select hostel</option>
+                {hostels.map((h) => (
+                  <option key={h._id} value={h._id}>{h.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {additionalFeesLoading ? (
+          <div className="flex justify-center items-center py-12">
+            <LoadingSpinner />
+            <p className="ml-3 text-gray-500">Loading caution deposit configuration...</p>
+          </div>
+        ) : !additionalFeesFilter.academicYear ? (
+          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+            <Cog6ToothIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-500 text-lg">Select an academic year to view configurations</p>
+          </div>
+        ) : Object.keys(additionalFees).length === 0 ? (
+          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+            <PlusIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-500 text-lg mb-2">No Caution Deposit configured for this hostel</p>
+            <p className="text-sm text-gray-400 mb-4">Click "Configure Caution Deposit" to configure amounts</p>
+            <button
+              onClick={() => openAdditionalFeeModal()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+              disabled={!additionalFeesFilter.academicYear}
+            >
+              Configure Caution Deposit
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {Object.entries(additionalFees).map(([feeType, feeData]) => (
+              <div
+                key={feeType}
+                className={`bg-white rounded-lg border-2 p-4 ${
+                  feeData.isActive ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50 opacity-90'
+                }`}
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex-1">
+                    <h3 className="text-base font-semibold text-gray-900 capitalize">
+                      {feeType.replace(/_/g, ' ')}
+                    </h3>
+                    {feeData.description && (
+                      <p className="text-xs text-gray-600 mt-1">{feeData.description}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      feeData.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {feeData.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mb-2">
+                  <p className="text-xs font-medium text-gray-700 mb-1">Categories</p>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.isArray(feeData.categories) && feeData.categories.length > 0 ? (
+                      feeData.categories.map((cat) => (
+                        <span
+                          key={cat}
+                          className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                        >
+                          {cat}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-gray-500">All categories</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-xs text-gray-500 mb-3">
+                  {(() => {
+                    const hostelId = typeof feeData.hostelId === 'object' ? feeData.hostelId?._id : feeData.hostelId;
+                    const hostelName = hostels.find((h) => h._id === hostelId)?.name;
+                    return hostelName ? `Hostel: ${hostelName}` : hostelId ? `Hostel: ${hostelId}` : 'Hostel: (not set)';
+                  })()}
+                </div>
+
+                <div className="mb-3 border-t border-gray-100 pt-2">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Category-Wise Fees</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                    {Object.entries(feeData.categoryAmounts || {}).map(([cat, amt]) => (
+                      <div key={cat} className="flex justify-between items-center text-xs py-0.5 border-b border-gray-100 last:border-b-0">
+                        <span className="font-medium text-gray-600">{cat}</span>
+                        <span className="font-bold text-blue-600">₹{Number(amt || 0).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-gray-200">
+                  <button
+                    onClick={() => openAdditionalFeeModal(feeType)}
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => toggleAdditionalFeeStatus(feeType)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium ${
+                      feeData.isActive
+                        ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                        : 'bg-green-600 text-white hover:bg-green-700'
+                    }`}
+                  >
+                    {feeData.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => deleteAdditionalFee(feeType)}
+                    className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showAdditionalFeeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {selectedAdditionalFee ? 'Edit Caution Deposit Configuration' : 'Configure Caution Deposit'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowAdditionalFeeModal(false);
+                  setSelectedAdditionalFee(null);
+                }}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleAdditionalFeeSubmit}>
+              <div className="space-y-4">
+                {/* Scope selectors inside modal */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Academic Year
+                    </label>
+                    <select
+                      value={additionalFeesFilter.academicYear}
+                      onChange={(e) => setAdditionalFeesFilter((p) => ({ ...p, academicYear: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    >
+                      {academicYearOptions().map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Hostel
+                    </label>
+                    <select
+                      value={additionalHostelId}
+                      onChange={(e) => setAdditionalHostelId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    >
+                      <option value="">Select hostel</option>
+                      {hostels.map((h) => (
+                        <option key={h._id} value={h._id}>{h.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-1">
+                      Fee Type
+                    </label>
+                    <div className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg font-semibold text-gray-700 text-sm">
+                      Caution Deposit
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-6 sm:mt-0">
+                    <label className="text-sm font-medium text-gray-700">Active</label>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                      checked={additionalFeeForm.isActive}
+                      onChange={(e) => setAdditionalFeeForm((p) => ({ ...p, isActive: e.target.checked }))}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description (optional)
+                  </label>
+                  <textarea
+                    value={additionalFeeForm.description}
+                    onChange={(e) => setAdditionalFeeForm((p) => ({ ...p, description: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    rows={2}
+                    placeholder="Short note about this fee"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Category Specific Amounts
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {(additionalFeeForm.categories || []).map((cat) => (
+                      <div key={cat} className="border border-gray-200 rounded-lg p-3">
+                        <div className="text-sm font-medium text-gray-700 mb-2">{cat}</div>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={additionalFeeForm.categoryAmounts?.[cat] || ''}
+                          onChange={(e) =>
+                            setAdditionalFeeForm((p) => ({
+                              ...p,
+                              categoryAmounts: { ...p.categoryAmounts, [cat]: e.target.value },
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="Amount"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {(!additionalFeeForm.categories || additionalFeeForm.categories.length === 0) && (
+                    <p className="text-xs text-red-500 mt-2">No categories available. Please configure categories.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdditionalFeeModal(false);
+                    setSelectedAdditionalFee(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={additionalFeesLoading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {additionalFeesLoading ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div className="min-h-screen">
+      <div className="mx-auto">
+        {/* Header Row with Inline Right Tabs */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-200 pb-2 mb-4 sm:mb-6 gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-blue-900 mb-1">
+              Fee Structure Management
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-600">
+              Manage fee structures mapped to courses, hostels, and categories
+            </p>
+          </div>
+          
+          <div className="flex overflow-x-auto sm:self-end">
+            <nav className="flex space-x-1 sm:space-x-2 min-w-max">
+              <button
+                onClick={() => setActiveTab('structure')}
+                className={`py-2 px-3 border-b-2 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-200 ${
+                  activeTab === 'structure'
+                    ? 'border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-lg'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Fee Structure
+              </button>
+              <button
+                onClick={() => setActiveTab('additional')}
+                className={`py-2 px-3 border-b-2 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-200 ${
+                  activeTab === 'additional'
+                    ? 'border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-lg'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Caution Deposit Setup
+              </button>
+            </nav>
+          </div>
+        </div>
+
+        {activeTab === 'structure' ? renderStructureTab() : renderAdditionalTab()}
+      </div>
+    </div>
+  );
+};
+
+export default FeeStructureManagement;

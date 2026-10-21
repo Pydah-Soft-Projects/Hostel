@@ -1,0 +1,1169 @@
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import api from '../../utils/axios';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line, AreaChart, Area } from 'recharts';
+import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  rectSortingStrategy
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  CheckCircleIcon,
+  ClockIcon,
+  ArrowTrendingUpIcon,
+  ExclamationTriangleIcon,
+  ArrowPathIcon,
+  UserGroupIcon,
+  UserIcon,
+  MegaphoneIcon,
+  ChartBarIcon,
+  ChartPieIcon,
+  BoltIcon,
+  EyeIcon,
+  ExclamationCircleIcon,
+  XMarkIcon,
+  CurrencyDollarIcon,
+  HomeIcon,
+  CalendarIcon,
+  AcademicCapIcon,
+  BuildingOfficeIcon,
+  BellIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  Bars3Icon
+} from '@heroicons/react/24/outline';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import { toast } from 'react-hot-toast';
+import SEO from '../../components/SEO';
+import { useAuth } from '../../context/AuthContext';
+import { hasPermission } from '../../utils/permissionUtils';
+
+// Normalize text for consistent grouping (handles plain strings or nested objects)
+const normalizeText = (value) => (value || '').toString().trim().toUpperCase();
+
+// Enhanced StatCard component with drag and drop support
+const DraggableStatCard = ({ id, icon: Icon, label, value, color, extra, trend, trendValue, onClick, animateDelay = 0 }) => {
+  const [isAnimating, setIsAnimating] = React.useState(true);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  React.useEffect(() => {
+    return () => {
+      setIsAnimating(false);
+    };
+  }, []);
+
+  const formatValue = (val) => {
+    if (typeof val === 'number') {
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
+      return val.toString();
+    }
+    return val;
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative group">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={isAnimating ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
+        transition={{ delay: animateDelay, duration: 0.4 }}
+        onClick={onClick}
+        className={`bg-white rounded-lg sm:rounded-xl shadow-md hover:shadow-lg transition-all duration-300 p-3 sm:p-4 lg:p-3 xl:p-2.5 border-l-4 ${color} ${onClick ? 'cursor-pointer active:scale-95' : ''} ${isDragging ? 'ring-2 ring-blue-500 ring-opacity-50 z-50' : ''}`}
+      >
+        {/* Drag Handle */}
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-2 right-2 p-1.5 rounded-md hover:bg-gray-200 cursor-grab active:cursor-grabbing opacity-30 group-hover:opacity-100 transition-opacity z-20 touch-none"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          title="Drag to reorder"
+        >
+          <Bars3Icon className="w-4 h-4 text-gray-500" />
+        </div>
+        <div className="flex items-center justify-between mb-2 sm:mb-1.5 lg:mb-0.5">
+          <div className="flex items-center gap-2.5 sm:gap-2 flex-1 min-w-0">
+            <div className={`p-2 sm:p-1.5 lg:p-1 rounded-lg flex-shrink-0 ${color.replace('border-', 'bg-').replace('-500', '-100')}`}>
+              <Icon className={`w-5 h-5 sm:w-5 sm:h-5 lg:w-4 lg:h-4 ${color.replace('border-', 'text-')}`} />
+            </div>
+            <div className="text-lg sm:text-xl lg:text-lg xl:text-xl font-bold text-gray-900 leading-tight truncate">{formatValue(value)}</div>
+          </div>
+          {trend && (
+            <div className={`flex items-center gap-1 text-xs font-medium flex-shrink-0 ml-2 ${trend === 'up' ? 'text-green-600' : trend === 'down' ? 'text-red-600' : 'text-gray-500'
+              }`}>
+              {trend === 'up' ? <ArrowUpIcon className="w-3 h-3" /> : trend === 'down' ? <ArrowDownIcon className="w-3 h-3" /> : null}
+              {trendValue && `${trendValue}%`}
+            </div>
+          )}
+        </div>
+        <div className="text-xs sm:text-sm lg:text-xs xl:text-sm text-gray-600 font-medium leading-tight truncate">{label}</div>
+        {extra && <div className="mt-1 sm:mt-0.5 lg:mt-0 text-xs text-gray-400 leading-tight truncate">{extra}</div>}
+      </motion.div>
+    </div>
+  );
+};
+
+// Fallback StatCard for non-draggable contexts (if needed)
+const StatCard = ({ icon: Icon, label, value, color, extra, trend, trendValue, onClick, animateDelay = 0 }) => {
+  const [isAnimating, setIsAnimating] = React.useState(true);
+
+  React.useEffect(() => {
+    return () => {
+      setIsAnimating(false);
+    };
+  }, []);
+
+  const formatValue = (val) => {
+    if (typeof val === 'number') {
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `${(val / 1000).toFixed(1)}K`;
+      return val.toString();
+    }
+    return val;
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={isAnimating ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
+      transition={{ delay: animateDelay, duration: 0.4 }}
+      onClick={onClick}
+      className={`bg-white rounded-lg sm:rounded-xl shadow-md hover:shadow-lg transition-all duration-300 p-3 sm:p-4 lg:p-3 xl:p-2.5 border-l-4 ${color} ${onClick ? 'cursor-pointer active:scale-95' : ''}`}
+    >
+      <div className="flex items-center justify-between mb-2 sm:mb-1.5 lg:mb-0.5">
+        <div className="flex items-center gap-2.5 sm:gap-2 flex-1 min-w-0">
+          <div className={`p-2 sm:p-1.5 lg:p-1 rounded-lg flex-shrink-0 ${color.replace('border-', 'bg-').replace('-500', '-100')}`}>
+            <Icon className={`w-5 h-5 sm:w-5 sm:h-5 lg:w-4 lg:h-4 ${color.replace('border-', 'text-')}`} />
+          </div>
+          <div className="text-lg sm:text-xl lg:text-lg xl:text-xl font-bold text-gray-900 leading-tight truncate">{formatValue(value)}</div>
+        </div>
+        {trend && (
+          <div className={`flex items-center gap-1 text-xs font-medium flex-shrink-0 ml-2 ${trend === 'up' ? 'text-green-600' : trend === 'down' ? 'text-red-600' : 'text-gray-500'
+            }`}>
+            {trend === 'up' ? <ArrowUpIcon className="w-3 h-3" /> : trend === 'down' ? <ArrowDownIcon className="w-3 h-3" /> : null}
+            {trendValue && `${trendValue}%`}
+          </div>
+        )}
+      </div>
+      <div className="text-xs sm:text-sm lg:text-xs xl:text-sm text-gray-600 font-medium leading-tight truncate">{label}</div>
+      {extra && <div className="mt-1 sm:mt-0.5 lg:mt-0 text-xs text-gray-400 leading-tight truncate">{extra}</div>}
+    </motion.div>
+  );
+};
+
+// Module Section Component
+const ModuleSection = ({ title, icon: Icon, iconColor, children, className = '' }) => {
+  return (
+    <div className={`bg-white rounded-lg sm:rounded-xl shadow-lg p-4 sm:p-6 ${className}`}>
+      <div className="flex items-center gap-2.5 sm:gap-3 mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-gray-200">
+        <div className={`p-2 sm:p-2 rounded-lg flex-shrink-0 ${iconColor}`}>
+          <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+        </div>
+        <h2 className="text-base sm:text-xl font-bold text-gray-900 truncate">{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+};
+
+const DashboardHome = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [analyticsMode, setAnalyticsMode] = useState('live'); // 'live' or 'ay'
+  const currentYearNum = new Date().getFullYear();
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState(`${currentYearNum}-${currentYearNum + 1}`);
+  const [activeId, setActiveId] = useState(null);
+
+  const ACADEMIC_YEARS = [
+    `${currentYearNum}-${currentYearNum + 1}`,
+    `${currentYearNum - 1}-${currentYearNum}`,
+    `${currentYearNum - 2}-${currentYearNum - 1}`,
+    `${currentYearNum - 3}-${currentYearNum - 2}`,
+    `${currentYearNum - 4}-${currentYearNum - 3}`
+  ];
+
+  // Stat cards order state - stored in localStorage
+  const getInitialCardOrder = useCallback(() => {
+    try {
+      const saved = localStorage.getItem('dashboard-stat-cards-order');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (error) {
+      console.error('Error loading card order from localStorage:', error);
+    }
+    return null; // Will use default order if null
+  }, []);
+
+  const [statCardsOrder, setStatCardsOrder] = useState(getInitialCardOrder);
+
+  // Save order to localStorage whenever it changes
+  useEffect(() => {
+    if (statCardsOrder) {
+      try {
+        localStorage.setItem('dashboard-stat-cards-order', JSON.stringify(statCardsOrder));
+      } catch (error) {
+        console.error('Error saving card order to localStorage:', error);
+      }
+    }
+  }, [statCardsOrder]);
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px of movement before starting drag
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Check if user is super admin
+  const isSuperAdmin = useMemo(() => user?.role === 'super_admin', [user]);
+
+  // Permission checks for each module - bypass for super_admin
+  const canViewStudents = useMemo(() => isSuperAdmin || hasPermission(user, 'student_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewAttendance = useMemo(() => isSuperAdmin || hasPermission(user, 'attendance_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewFinancial = useMemo(() => isSuperAdmin || hasPermission(user, 'fee_management'), [user, isSuperAdmin]);
+  const canViewComplaints = useMemo(() => isSuperAdmin || hasPermission(user, 'maintenance_ticket_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewLeaves = useMemo(() => isSuperAdmin || hasPermission(user, 'leave_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewMenu = useMemo(() => isSuperAdmin || hasPermission(user, 'menu_management'), [user, isSuperAdmin]);
+  const canViewRooms = useMemo(() => isSuperAdmin || hasPermission(user, 'room_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewAnnouncements = useMemo(() => isSuperAdmin || hasPermission(user, 'announcement_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewPolls = useMemo(() => isSuperAdmin || hasPermission(user, 'poll_management') || user?.role === 'warden', [user, isSuperAdmin]);
+  const canViewCommunication = useMemo(() => canViewAnnouncements || canViewPolls, [canViewAnnouncements, canViewPolls]);
+
+  // Check if user has any permissions to view dashboard content
+  const hasAnyPermission = useMemo(() => {
+    return isSuperAdmin || canViewStudents || canViewAttendance || canViewFinancial || canViewComplaints ||
+      canViewLeaves || canViewMenu || canViewRooms || canViewCommunication;
+  }, [isSuperAdmin, canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints,
+    canViewLeaves, canViewMenu, canViewRooms, canViewCommunication]);
+
+  // Count visible stat cards for dynamic grid
+  const visibleStatCards = useMemo(() => {
+    let count = 0;
+    if (canViewStudents) count++;
+    if (canViewAttendance) count++;
+    if (canViewFinancial) count++;
+    if (canViewComplaints) count++;
+    return count;
+  }, [canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints]);
+
+  // Count visible modules in left column
+  const visibleLeftModules = useMemo(() => {
+    let count = 0;
+    if (canViewStudents) count++;
+    if (canViewAttendance) count++;
+    if (canViewFinancial) count++;
+    if (canViewComplaints) count++;
+    if (canViewLeaves) count++;
+    return count;
+  }, [canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints, canViewLeaves]);
+
+  // Count visible modules in right column
+  const visibleRightModules = useMemo(() => {
+    let count = 0;
+    if (canViewMenu) count++;
+    if (canViewRooms) count++;
+    if (canViewCommunication) count++;
+    if (canViewStudents || canViewAttendance || canViewAnnouncements || canViewPolls) count++; // Quick Actions
+    return count;
+  }, [canViewMenu, canViewRooms, canViewCommunication, canViewStudents, canViewAttendance, canViewAnnouncements, canViewPolls]);
+
+  // State for all modules
+  const [stats, setStats] = useState({
+    students: {
+      total: 0,
+      active: 0,
+      inactive: 0,
+      newThisWeek: 0,
+      byCourse: []
+    },
+    attendance: {
+      today: {
+        total: 0,
+        present: 0,
+        absent: 0,
+        percentage: 0,
+        fullyPresent: 0,
+        partiallyPresent: 0,
+        morningPresent: 0,
+        eveningPresent: 0,
+        nightPresent: 0
+      },
+      trend: []
+    },
+    financial: {
+      totalCollection: 0,
+      pendingPayments: 0,
+      electricityPayments: 0,
+      hostelFeeCollection: 0,
+      thisMonth: 0,
+      lastMonth: 0
+    },
+    complaints: {
+      total: 0,
+      active: 0,
+      resolved: 0,
+      inProgress: 0,
+      resolvedThisWeek: 0,
+      avgResolutionTime: 0
+    },
+    leaves: {
+      pending: 0,
+      approvedToday: 0,
+      rejectedToday: 0,
+      thisWeek: []
+    },
+    rooms: {
+      total: 0,
+      occupied: 0,
+      available: 0,
+      occupancyRate: 0,
+      byGender: []
+    },
+    communication: {
+      activeAnnouncements: 0,
+      activePolls: 0,
+      recentAnnouncements: [],
+      recentPolls: []
+    },
+    menu: {
+      todaysMenu: null,
+      hasMenu: false
+    }
+  });
+
+  // Safari detection
+  const isSafari = useMemo(() => /^((?!chrome|android).)*safari/i.test(navigator.userAgent), []);
+
+  const isInitialMount = React.useRef(true);
+
+  // Fetch all dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const summaryEndpoint = analyticsMode === 'ay'
+          ? `/api/admin/dashboard-summary?academicYear=${selectedAcademicYear}`
+          : '/api/admin/dashboard-summary';
+
+        // Fetch primary summary data from lightweight aggregated endpoint
+        const summaryRes = await api.get(summaryEndpoint).catch(() => null);
+        if (summaryRes?.data?.success) {
+          const sData = summaryRes.data.data;
+          setStats(prev => ({
+            ...prev,
+            students: sData.students || prev.students,
+            complaints: sData.complaints || prev.complaints,
+            leaves: sData.leaves || prev.leaves,
+            rooms: sData.rooms || prev.rooms,
+            communication: sData.communication || prev.communication
+          }));
+        }
+
+        // Only fetch static attendance & cafeteria menu once on initial load
+        if (isInitialMount.current) {
+          isInitialMount.current = false;
+          const [attendanceStatsRes, todaysMenuRes] = await Promise.allSettled([
+            api.get(`/api/attendance/stats?date=${today}`),
+            api.get('/api/cafeteria/menu/today')
+          ]);
+
+          // Process Attendance Data
+          if (attendanceStatsRes.status === 'fulfilled' && attendanceStatsRes.value?.data?.success) {
+            const attendanceData = attendanceStatsRes.value.data.data.statistics || {};
+            setStats(prev => ({
+              ...prev,
+              attendance: {
+                ...prev.attendance,
+                today: {
+                  total: attendanceData.totalStudents || 0,
+                  present: attendanceData.fullyPresent || 0,
+                  absent: attendanceData.absent || 0,
+                  percentage: attendanceData.percentages?.fullyPresentPercentage || 0,
+                  fullyPresent: attendanceData.fullyPresent || 0,
+                  partiallyPresent: attendanceData.partiallyPresent || 0,
+                  morningPresent: attendanceData.morningPresent || 0,
+                  eveningPresent: attendanceData.eveningPresent || 0,
+                  nightPresent: attendanceData.nightPresent || 0
+                }
+              }
+            }));
+          }
+
+          // Process Today's Menu Data
+          if (todaysMenuRes.status === 'fulfilled' && todaysMenuRes.value?.data?.success) {
+            const menuData = todaysMenuRes.value.data.data;
+            setStats(prev => ({
+              ...prev,
+              menu: {
+                todaysMenu: menuData,
+                hasMenu: !!menuData && !!menuData.meals
+              }
+            }));
+          } else {
+            setStats(prev => ({
+              ...prev,
+              menu: {
+                todaysMenu: null,
+                hasMenu: false
+              }
+            }));
+          }
+        }
+
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        toast.error('Failed to load dashboard data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [analyticsMode, selectedAcademicYear]);
+
+  // Calculate trends
+  const financialTrend = useMemo(() => {
+    if (stats.financial.lastMonth === 0) return null;
+    const change = ((stats.financial.thisMonth - stats.financial.lastMonth) / stats.financial.lastMonth) * 100;
+    return {
+      direction: change >= 0 ? 'up' : 'down',
+      value: Math.abs(Math.round(change))
+    };
+  }, [stats.financial.thisMonth, stats.financial.lastMonth]);
+
+  // Define stat card items with their IDs and configurations
+  const statCardItems = useMemo(() => {
+    const items = [];
+    if (canViewStudents) {
+      items.push({
+        id: 'students',
+        icon: UserGroupIcon,
+        label: analyticsMode === 'ay' ? 'Overall Students' : 'Active Students',
+        value: analyticsMode === 'ay' ? (stats.students.total || stats.students.active) : stats.students.active,
+        color: 'border-blue-500 text-blue-600',
+        extra: analyticsMode === 'ay'
+          ? `${stats.students.active || 0} active | ${stats.students.inactive || 0} inactive`
+          : `${stats.students.inactive || 0} inactive students`,
+        onClick: () => navigate('/admin/dashboard/students'),
+        animateDelay: 0.05
+      });
+    }
+    if (canViewAttendance) {
+      items.push({
+        id: 'attendance',
+        icon: CheckCircleIcon,
+        label: "Today's Attendance",
+        value: `${stats.attendance.today.percentage}%`,
+        color: 'border-green-500 text-green-600',
+        extra: `${stats.attendance.today.present} present`,
+        onClick: () => navigate('/admin/dashboard/attendance'),
+        animateDelay: 0.1
+      });
+    }
+    if (canViewFinancial) {
+      items.push({
+        id: 'financial',
+        icon: CurrencyDollarIcon,
+        label: 'Fee Collection (This Month)',
+        value: `₹${(stats.financial.thisMonth / 1000).toFixed(0)}K`,
+        color: 'border-purple-500 text-purple-600',
+        trend: financialTrend?.direction,
+        trendValue: financialTrend?.value,
+        extra: `₹${(stats.financial.pendingPayments / 1000).toFixed(0)}K pending`,
+        onClick: () => navigate('/admin/dashboard/fee-management'),
+        animateDelay: 0.15
+      });
+    }
+    if (canViewComplaints) {
+      items.push({
+        id: 'complaints',
+        icon: ExclamationCircleIcon,
+        label: 'Active Complaints',
+        value: stats.complaints.active,
+        color: 'border-orange-500 text-orange-600',
+        extra: `${stats.complaints.resolvedThisWeek} resolved this week`,
+        onClick: () => navigate('/admin/dashboard/complaints'),
+        animateDelay: 0.2
+      });
+    }
+    return items;
+  }, [canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints, stats, financialTrend, navigate, analyticsMode]);
+
+  // Get ordered stat cards (apply saved order if available)
+  const orderedStatCards = useMemo(() => {
+    if (!statCardsOrder || statCardsOrder.length === 0) {
+      return statCardItems;
+    }
+
+    // Create a map for quick lookup
+    const itemMap = new Map(statCardItems.map(item => [item.id, item]));
+
+    // Build ordered array based on saved order, filtering out items that no longer exist
+    const ordered = statCardsOrder
+      .map(id => itemMap.get(id))
+      .filter(Boolean);
+
+    // Add any new items that weren't in the saved order
+    const existingIds = new Set(ordered.map(item => item.id));
+    const newItems = statCardItems.filter(item => !existingIds.has(item.id));
+
+    return [...ordered, ...newItems];
+  }, [statCardsOrder, statCardItems]);
+
+  // Initialize statCardsOrder when statCardItems change (first load or permission changes)
+  useEffect(() => {
+    if (!statCardsOrder && statCardItems.length > 0) {
+      setStatCardsOrder(statCardItems.map(item => item.id));
+    }
+  }, [statCardItems, statCardsOrder]);
+
+  // Handle drag end
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (active.id !== over?.id) {
+      setStatCardsOrder((items) => {
+        if (!items) {
+          return orderedStatCards.map(item => item.id);
+        }
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const handleDragStart = (event) => {
+    setActiveId(event.active.id);
+  };
+
+  // Show message if user has no permissions
+  if (!hasAnyPermission && !loading) {
+    return (
+      <>
+        <SEO
+          title="Admin Dashboard"
+          description="Admin dashboard for hostel management system"
+          keywords="Admin Dashboard, Hostel Management"
+        />
+        <div className="mx-auto mt-12 sm:mt-0 w-full flex items-center justify-center min-h-[60vh]">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md">
+            <ExclamationCircleIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">No Access</h2>
+            <p className="text-gray-600">
+              You don't have permission to view any dashboard modules. Please contact your administrator.
+            </p>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SEO
+        title="Admin Dashboard"
+        description="Comprehensive admin dashboard for hostel management system with real-time statistics and insights."
+        keywords="Admin Dashboard, Hostel Management, Statistics, Analytics"
+      />
+      <div className="mx-auto mt-12 sm:mt-0 space-y-4 sm:space-y-6">
+        {/* Header - Always visible */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-blue-900">Dashboard Overview</h1>
+            <p className="text-xs sm:text-sm text-gray-600 mt-1">Welcome back! Here's your system overview.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 bg-white p-1.5 rounded-xl shadow-sm border border-gray-100 w-full sm:w-auto">
+            <div className="relative grid grid-cols-2 items-center bg-gray-200/80 p-1 rounded-xl w-64 sm:w-72 border border-gray-300/60 shadow-inner">
+              <motion.div
+                className="absolute top-1 bottom-1 bg-blue-600 rounded-lg shadow-md"
+                initial={false}
+                animate={{
+                  left: analyticsMode === 'live' ? '4px' : 'calc(50% + 2px)',
+                  width: 'calc(50% - 6px)'
+                }}
+                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+              />
+
+              <button
+                type="button"
+                onClick={() => setAnalyticsMode('live')}
+                className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
+                  analyticsMode === 'live' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                Live Analytics
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAnalyticsMode('ay')}
+                className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
+                  analyticsMode === 'ay' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                }`}
+              >
+                AY Wise Analytics
+              </button>
+            </div>
+
+            <select
+              value={selectedAcademicYear}
+              disabled={analyticsMode === 'live'}
+              onChange={(e) => setSelectedAcademicYear(e.target.value)}
+              className={`px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${
+                analyticsMode === 'live'
+                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                  : 'bg-white text-gray-800 border-gray-300 hover:border-gray-400 cursor-pointer'
+              }`}
+              title={analyticsMode === 'live' ? 'Switch to AY Wise Analytics to select academic year' : 'Select Academic Year'}
+            >
+              {ACADEMIC_YEARS.map((ay) => (
+                <option key={ay} value={ay}>
+                  AY {ay}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Inline Content / Loading Area below Header */}
+        {loading ? (
+          <div className="flex justify-center items-center h-64 bg-white/50 rounded-xl shadow-sm border border-gray-100">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : (
+          <>
+
+        {/* Key Metrics Overview - Dynamic grid based on visible cards with drag and drop */}
+        {visibleStatCards > 0 && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={orderedStatCards.map(item => item.id)}
+              strategy={rectSortingStrategy}
+            >
+              <div
+                className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 lg:gap-4 group"
+              >
+                {orderedStatCards.map((item) => (
+                  <DraggableStatCard
+                    key={item.id}
+                    id={item.id}
+                    icon={item.icon}
+                    label={item.label}
+                    value={item.value}
+                    color={item.color}
+                    extra={item.extra}
+                    trend={item.trend}
+                    trendValue={item.trendValue}
+                    onClick={item.onClick}
+                    animateDelay={item.animateDelay}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+            <DragOverlay>
+              {activeId ? (
+                (() => {
+                  const activeItem = orderedStatCards.find(item => item.id === activeId);
+                  return activeItem ? (
+                    <div className="bg-white rounded-lg sm:rounded-xl shadow-xl p-3 sm:p-4 lg:p-3 xl:p-2.5 border-l-4 opacity-90 rotate-3 scale-105">
+                      <div className="flex items-center gap-2.5 sm:gap-2">
+                        <div className={`p-2 sm:p-1.5 lg:p-1 rounded-lg ${activeItem.color.replace('border-', 'bg-').replace('-500', '-100')}`}>
+                          <activeItem.icon className={`w-5 h-5 ${activeItem.color.replace('border-', 'text-')}`} />
+                        </div>
+                        <div className="text-lg sm:text-xl font-bold text-gray-900">{activeItem.value}</div>
+                      </div>
+                      <div className="text-xs sm:text-sm text-gray-600 mt-1">{activeItem.label}</div>
+                    </div>
+                  ) : null;
+                })()
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+
+        {/* Main Content Grid */}
+        {(visibleLeftModules > 0 || visibleRightModules > 0) && (
+          <div className={`grid grid-cols-1 gap-4 sm:gap-6 ${visibleLeftModules > 0 && visibleRightModules > 0
+              ? 'lg:grid-cols-3'
+              : 'lg:grid-cols-1'
+            }`}>
+            {/* Left Column - 2/3 width if both columns have content, full width if only left */}
+            {visibleLeftModules > 0 && (
+              <div className={`space-y-4 sm:space-y-6 ${visibleLeftModules > 0 && visibleRightModules > 0
+                  ? 'lg:col-span-2'
+                  : ''
+                }`}>
+                {/* Students & Attendance */}
+                {(canViewStudents || canViewAttendance) && (
+                  <div
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6"
+                  >
+                    {canViewStudents && (
+                      <ModuleSection
+                        title="Student Management"
+                        icon={AcademicCapIcon}
+                        iconColor="bg-blue-500"
+                      >
+                        <div className="space-y-3 sm:space-y-4">
+                          <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                            <div className="bg-blue-50 rounded-lg p-3 sm:p-4">
+                              <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-900">{stats.students.active}</div>
+                              <div className="text-xs sm:text-sm text-blue-600 mt-1">Active Students</div>
+                            </div>
+                            {analyticsMode === 'live' ? (
+                              <div className="bg-green-50 rounded-lg p-3 sm:p-4">
+                                <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-900">{stats.students.newThisWeek}</div>
+                                <div className="text-xs sm:text-sm text-green-600 mt-1">New This Week</div>
+                              </div>
+                            ) : (
+                              <div className="bg-amber-50 rounded-lg p-3 sm:p-4">
+                                <div className="text-lg sm:text-xl lg:text-2xl font-bold text-amber-900">{stats.students.inactive || 0}</div>
+                                <div className="text-xs sm:text-sm text-amber-700 mt-1">Inactive Students</div>
+                              </div>
+                            )}
+                          </div>
+                          {stats.students.byCourse.length > 0 && (
+                            <div>
+                              <div className="text-xs sm:text-sm font-medium text-gray-700 mb-2">By Course</div>
+                              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-2.5">
+                                {stats.students.byCourse.map((course, idx) => {
+                                  const colors = [
+                                    { bg: 'bg-blue-50', text: 'text-blue-900' },
+                                    { bg: 'bg-green-50', text: 'text-green-900' },
+                                    { bg: 'bg-purple-50', text: 'text-purple-900' },
+                                    { bg: 'bg-orange-50', text: 'text-orange-900' }
+                                  ];
+                                  const color = colors[idx % colors.length];
+                                  return (
+                                    <div key={course.name} className={`text-center ${color.bg} rounded-lg p-2 sm:p-2.5`}>
+                                      <div className={`text-sm sm:text-base font-bold ${color.text}`}>{course.count}</div>
+                                      <div className="text-xs text-gray-600 mt-0.5 truncate" title={course.name}>{course.name}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => navigate('/admin/dashboard/students')}
+                            className="w-full py-2 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors active:bg-blue-100"
+                          >
+                            View All Students →
+                          </button>
+                        </div>
+                      </ModuleSection>
+                    )}
+
+                    {canViewAttendance && (
+                      <ModuleSection
+                        title="Attendance"
+                        icon={CalendarIcon}
+                        iconColor="bg-green-500"
+                      >
+                        <div className="space-y-3 sm:space-y-4">
+                          <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-lg p-3 sm:p-4 text-white">
+                            <div className="text-xl sm:text-2xl lg:text-3xl font-bold mb-1">{stats.attendance.today.percentage}%</div>
+                            <div className="text-xs sm:text-sm opacity-90">Today's Attendance Rate</div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            <div className="text-center">
+                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.fullyPresent}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">Fully Present</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.partiallyPresent}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">Partial</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.absent}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">Absent</div>
+                            </div>
+                          </div>
+                          <div className="border-t border-gray-200 pt-2.5 sm:pt-3">
+                            <div className="text-xs sm:text-sm font-medium text-gray-700 mb-2">Recent Session Presentees</div>
+                            <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+                              <div className="text-center bg-blue-50 rounded-lg p-2 sm:p-2.5">
+                                <div className="text-sm sm:text-base font-bold text-blue-900">🌅 {stats.attendance.today.morningPresent}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">Morning</div>
+                              </div>
+                              <div className="text-center bg-orange-50 rounded-lg p-2 sm:p-2.5">
+                                <div className="text-sm sm:text-base font-bold text-orange-900">🌆 {stats.attendance.today.eveningPresent}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">Evening</div>
+                              </div>
+                              <div className="text-center bg-purple-50 rounded-lg p-2 sm:p-2.5">
+                                <div className="text-sm sm:text-base font-bold text-purple-900">🌙 {stats.attendance.today.nightPresent}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">Night</div>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => navigate('/admin/dashboard/attendance')}
+                            className="w-full py-2 text-xs sm:text-sm font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors active:bg-green-100"
+                          >
+                            View Attendance →
+                          </button>
+                        </div>
+                      </ModuleSection>
+                    )}
+                  </div>
+                )}
+
+                {/* Financial Overview */}
+                {canViewFinancial && (
+                  <ModuleSection
+                    title="Financial Overview"
+                    icon={CurrencyDollarIcon}
+                    iconColor="bg-purple-500"
+                  >
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
+                      <div className="bg-purple-50 rounded-lg p-3 sm:p-4">
+                        <div className="text-base sm:text-lg lg:text-xl font-bold text-purple-900">₹{(stats.financial.thisMonth / 1000).toFixed(0)}K</div>
+                        <div className="text-xs text-purple-600 mt-1">This Month</div>
+                      </div>
+                      <div className="bg-orange-50 rounded-lg p-3 sm:p-4">
+                        <div className="text-base sm:text-lg lg:text-xl font-bold text-orange-900">₹{(stats.financial.pendingPayments / 1000).toFixed(0)}K</div>
+                        <div className="text-xs text-orange-600 mt-1">Pending</div>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg p-3 sm:p-4">
+                        <div className="text-base sm:text-lg lg:text-xl font-bold text-blue-900">₹{(stats.financial.electricityPayments / 1000).toFixed(0)}K</div>
+                        <div className="text-xs text-blue-600 mt-1">Electricity</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg p-3 sm:p-4">
+                        <div className="text-base sm:text-lg lg:text-xl font-bold text-green-900">₹{(stats.financial.hostelFeeCollection / 1000).toFixed(0)}K</div>
+                        <div className="text-xs text-green-600 mt-1">Hostel Fees</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate('/admin/dashboard/fee-management')}
+                      className="w-full mt-3 sm:mt-4 py-2 text-xs sm:text-sm font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors active:bg-purple-100"
+                    >
+                      View Financial Details →
+                    </button>
+                  </ModuleSection>
+                )}
+
+                {/* Complaints & Leaves */}
+                {(canViewComplaints || canViewLeaves) && (
+                  <div
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6"
+                  >
+                    {canViewComplaints && (
+                      <ModuleSection
+                        title="Complaint Management"
+                        icon={ExclamationCircleIcon}
+                        iconColor="bg-orange-500"
+                      >
+                        <div className="space-y-3 sm:space-y-4">
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="text-center">
+                              <div className="text-lg sm:text-xl font-bold text-orange-900">{stats.complaints.active}</div>
+                              <div className="text-xs text-gray-500">Active</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-lg sm:text-xl font-bold text-green-900">{stats.complaints.resolved}</div>
+                              <div className="text-xs text-gray-500">Resolved</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-lg sm:text-xl font-bold text-blue-900">{stats.complaints.inProgress}</div>
+                              <div className="text-xs text-gray-500">In Progress</div>
+                            </div>
+                          </div>
+                          {stats.complaints.avgResolutionTime > 0 && (
+                            <div className="bg-gray-50 rounded-lg p-2.5 sm:p-3">
+                              <div className="text-xs sm:text-sm text-gray-600">Avg. Resolution Time</div>
+                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.complaints.avgResolutionTime} days</div>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => navigate('/admin/dashboard/complaints')}
+                            className="w-full py-2 text-xs sm:text-sm font-medium text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg transition-colors active:bg-orange-100"
+                          >
+                            Manage Complaints →
+                          </button>
+                        </div>
+                      </ModuleSection>
+                    )}
+
+                    {canViewLeaves && (
+                      <ModuleSection
+                        title="Leave Management"
+                        icon={CalendarIcon}
+                        iconColor="bg-indigo-500"
+                      >
+                        <div className="space-y-3 sm:space-y-4">
+                          <div className="bg-indigo-50 rounded-lg p-3 sm:p-4">
+                            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-900 mb-1">{stats.leaves.pending}</div>
+                            <div className="text-xs sm:text-sm text-indigo-600">Pending Approvals</div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                            <div className="text-center">
+                              <div className="text-base sm:text-lg font-bold text-green-900">{stats.leaves.approvedToday}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">Approved Today</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-base sm:text-lg font-bold text-red-900">{stats.leaves.rejectedToday}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">Rejected Today</div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => navigate('/admin/dashboard/leave')}
+                            className="w-full py-2 text-xs sm:text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors active:bg-indigo-100"
+                          >
+                            Manage Leaves →
+                          </button>
+                        </div>
+                      </ModuleSection>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Right Column - 1/3 width if both columns have content, full width if only right */}
+            {visibleRightModules > 0 && (
+              <div className={`space-y-4 sm:space-y-6 ${visibleLeftModules > 0 && visibleRightModules > 0
+                  ? 'lg:col-span-1'
+                  : ''
+                }`}>
+                {/* Today's Menu */}
+                {canViewMenu && (
+                  <ModuleSection
+                    title="Today's Menu"
+                    icon={ChartBarIcon}
+                    iconColor="bg-orange-500"
+                  >
+                    <div className="space-y-3 sm:space-y-4">
+                      {stats.menu.hasMenu && stats.menu.todaysMenu ? (
+                        <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                          {['breakfast', 'lunch', 'snacks', 'dinner'].map(meal => {
+                            const mealItems = stats.menu.todaysMenu.meals?.[meal] || [];
+                            const mealEmojis = {
+                              breakfast: '🥞',
+                              lunch: '🍛',
+                              snacks: '🍿',
+                              dinner: '🍽️'
+                            };
+                            return (
+                              <div
+                                key={meal}
+                                className="bg-gray-50 rounded-lg p-2.5 sm:p-3 border border-gray-200"
+                              >
+                                <div className="flex items-center gap-1.5 mb-1.5 sm:mb-2">
+                                  <span className="text-base sm:text-lg">{mealEmojis[meal]}</span>
+                                  <span className="text-xs sm:text-sm font-medium text-gray-900 capitalize truncate">
+                                    {meal}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {mealItems.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      {mealItems.slice(0, 2).map((item, idx) => (
+                                        <div key={idx} className="truncate">
+                                          • {typeof item === 'string' ? item : (item.name || item)}
+                                        </div>
+                                      ))}
+                                      {mealItems.length > 2 && (
+                                        <div className="text-gray-400 text-xs">
+                                          +{mealItems.length - 2} more
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400 italic">No items</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4">
+                          <div className="text-gray-400 text-2xl mb-2">🍽️</div>
+                          <div className="text-xs sm:text-sm text-gray-500 mb-2">No menu set for today</div>
+                          <button
+                            onClick={() => navigate('/admin/dashboard/cafeteria/menu')}
+                            className="px-3 py-1.5 bg-orange-600 text-white rounded text-xs hover:bg-orange-700 transition-colors"
+                          >
+                            Create Menu
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => navigate('/admin/dashboard/cafeteria/menu')}
+                        className="w-full py-2 text-xs sm:text-sm font-medium text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg transition-colors active:bg-orange-100"
+                      >
+                        Manage Menu →
+                      </button>
+                    </div>
+                  </ModuleSection>
+                )}
+
+                {/* Rooms Overview */}
+                {canViewRooms && (
+                  <ModuleSection
+                    title="Room Management"
+                    icon={BuildingOfficeIcon}
+                    iconColor="bg-cyan-500"
+                  >
+                    <div className="space-y-3 sm:space-y-4">
+                      <div className="bg-gradient-to-r from-cyan-500 to-cyan-600 rounded-lg p-3 sm:p-4 text-white">
+                        <div className="text-xl sm:text-2xl lg:text-3xl font-bold mb-1">{stats.rooms.occupancyRate}%</div>
+                        <div className="text-xs sm:text-sm opacity-90">Bed Occupancy Rate</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                        <div className="text-center">
+                          <div className="text-base sm:text-lg font-bold text-gray-900">{stats.rooms.occupied}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Filled Beds</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-base sm:text-lg font-bold text-gray-900">{stats.rooms.available}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Available Beds</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => navigate('/admin/dashboard/rooms/management')}
+                        className="w-full py-2 text-xs sm:text-sm font-medium text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50 rounded-lg transition-colors active:bg-cyan-100"
+                      >
+                        View Rooms →
+                      </button>
+                    </div>
+                  </ModuleSection>
+                )}
+
+                {/* Communication */}
+                {canViewCommunication && (
+                  <ModuleSection
+                    title="Communication"
+                    icon={MegaphoneIcon}
+                    iconColor="bg-pink-500"
+                  >
+                    <div className="space-y-3 sm:space-y-4">
+                      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                        <div className="bg-pink-50 rounded-lg p-3 sm:p-3 text-center">
+                          <div className="text-base sm:text-lg lg:text-xl font-bold text-pink-900">{stats.communication.activeAnnouncements}</div>
+                          <div className="text-xs text-pink-600 mt-0.5">Announcements</div>
+                        </div>
+                        <div className="bg-purple-50 rounded-lg p-3 sm:p-3 text-center">
+                          <div className="text-base sm:text-lg lg:text-xl font-bold text-purple-900">{stats.communication.activePolls}</div>
+                          <div className="text-xs text-purple-600 mt-0.5">Active Polls</div>
+                        </div>
+                      </div>
+                      {stats.communication.recentAnnouncements.length > 0 && (
+                        <div>
+                          <div className="text-xs sm:text-sm font-medium text-gray-700 mb-2">Recent Announcements</div>
+                          <div className="space-y-1.5 sm:space-y-2">
+                            {stats.communication.recentAnnouncements.map((announcement, idx) => (
+                              <div key={idx} className="text-xs text-gray-600 truncate">
+                                {announcement.title}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => navigate('/admin/dashboard/announcements')}
+                        className="w-full py-2 text-xs sm:text-sm font-medium text-pink-600 hover:text-pink-700 hover:bg-pink-50 rounded-lg transition-colors active:bg-pink-100"
+                      >
+                        View All →
+                      </button>
+                    </div>
+                  </ModuleSection>
+                )}
+
+                {/* Quick Actions */}
+                {(canViewStudents || canViewAttendance || canViewAnnouncements || canViewPolls) && (
+                  <div className="bg-white rounded-lg sm:rounded-xl shadow-lg p-4 sm:p-6">
+                    <h2 className="text-base sm:text-xl font-bold text-gray-900 mb-3 sm:mb-4">Quick Actions</h2>
+                    <div className="space-y-2 sm:space-y-2">
+                      {canViewStudents && (
+                        <button
+                          onClick={() => navigate('/admin/dashboard/students')}
+                          className="w-full text-left px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors active:bg-gray-100"
+                        >
+                          Add New Student
+                        </button>
+                      )}
+                      {canViewAttendance && (
+                        <button
+                          onClick={() => navigate('/admin/dashboard/attendance')}
+                          className="w-full text-left px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors active:bg-gray-100"
+                        >
+                          Mark Attendance
+                        </button>
+                      )}
+                      {canViewAnnouncements && (
+                        <button
+                          onClick={() => navigate('/admin/dashboard/announcements')}
+                          className="w-full text-left px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors active:bg-gray-100"
+                        >
+                          Create Announcement
+                        </button>
+                      )}
+                      {canViewPolls && (
+                        <button
+                          onClick={() => navigate('/admin/dashboard/polls')}
+                          className="w-full text-left px-3 sm:px-4 py-2.5 sm:py-2 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors active:bg-gray-100"
+                        >
+                          Create Poll
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        </>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default DashboardHome;

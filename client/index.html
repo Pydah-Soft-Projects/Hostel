@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./PYDAHSOFT LOGO.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Apple Touch Icons for iOS -->
+    <link rel="apple-touch-icon" href="/images/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/images/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/icon-180x180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/images/icon-167x167.png" />
+    
+    <!-- Safari-specific meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Pydah Hostel">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#FFFFFF">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Pydah Hostel">
+    <meta name="msapplication-TileColor" content="#FFFFFF">
+    <meta name="msapplication-TileImage" content="/images/icon-144x144.png">
+    
+    <!-- Safari polyfills and compatibility fixes -->
+    <script>
+      // Safari localStorage polyfill and compatibility fixes
+      (function() {
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        
+        if (isSafari) {
+          console.log('🦁 Safari detected - applying compatibility fixes');
+          
+          // Ensure localStorage is available
+          if (typeof localStorage === 'undefined') {
+            console.warn('🦁 localStorage not available, using sessionStorage fallback');
+            window.localStorage = window.sessionStorage;
+          }
+          
+          // Fix for Safari's strict CORS handling
+          if (window.fetch) {
+            const originalFetch = window.fetch;
+            window.fetch = function(url, options = {}) {
+              // Add Safari-specific headers
+              if (!options.headers) {
+                options.headers = {};
+              }
+              options.headers['X-Requested-With'] = 'XMLHttpRequest';
+              
+              return originalFetch(url, options);
+            };
+          }
+          
+          // Fix for Safari's Promise handling
+          if (!window.Promise) {
+            console.warn('🦁 Promise not available - this might cause issues');
+          }
+        }
+      })();
+    </script>
+    
+    <!-- OneSignal SDK v16 - Improved Service Worker Registration -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      // Global variable to track service worker registration
+      window.serviceWorkerRegistration = null;
+      
+      // Improved iOS/Safari detection
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isIOSSafari = isSafari && isIOS;
+      const isIOSChrome = /CriOS/.test(navigator.userAgent);
+      
+      console.log('🦁 Browser detection:', {
+        userAgent: navigator.userAgent,
+        isSafari,
+        isIOS,
+        isIOSSafari,
+        isIOSChrome
+      });
+      
+      // Improved service worker registration
+      async function registerServiceWorker() {
+              // Skip service worker registration for iOS Safari only (not iOS Chrome)
+      if (isIOSSafari && !isIOSChrome) {
+        console.log('🦁 iOS Safari detected - skipping OneSignal service worker registration');
+          return null;
+        }
+        
+        if ('serviceWorker'in navigator) {
+          try {
+            console.log('🔔 Registering OneSignal Service Worker from /OneSignalSDKWorker.js');
+            
+            // Register new service worker from the root
+            const registration = await navigator.serviceWorker.register('/OneSignalSDKWorker.js', {
+              scope: '/',
+            });
+            
+            console.log('🔔 OneSignal Service Worker registered successfully:', registration);
+            window.serviceWorkerRegistration = registration;
+            
+            // Wait for the service worker to be ready
+            await navigator.serviceWorker.ready;
+            console.log('🔔 OneSignal Service Worker is ready');
+            
+            return registration;
+            
+          } catch (error) {
+            console.error('🔔 OneSignal Service Worker registration failed:', error);
+            return null;
+          }
+        } else {
+          console.warn('🔔 Service Worker not supported in this browser');
+          return null;
+        }
+      }
+
+      // Initialize OneSignal after service worker is ready
+      async function initializeOneSignal() {
+        // Skip OneSignal initialization for iOS Safari only (not iOS Chrome)
+        if (isIOSSafari && !isIOSChrome) {
+          console.log('🦁 iOS Safari detected - skipping OneSignal initialization');
+          console.log('🦁 Push notifications will use database fallback only');
+          return;
+        }
+        
+        try {
+          // Wait for service worker registration
+          await registerServiceWorker();
+          
+          // Wait a bit more to ensure service worker is fully ready
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Push the initialization function to the OneSignal queue
+          window.OneSignalDeferred.push(async function(OneSignal) {
+            console.log('🔔 Initializing OneSignal SDK v16...');
+            
+            const config = {
+              appId: "7a3290a8-d6a8-4e09-903f-c4a0f251ca01",
+              safari_web_id: "web.onesignal.auto.42873e37-42b9-4e5d-9423-af83e9e44ff4",
+              notifyButton: {
+                enable: true,
+              },
+              allowLocalhostAsSecureOrigin: true, // For development
+              serviceWorkerPath: "OneSignalSDKWorker.js", // Ensure this points to the root
+            };
+            
+            // Initialize OneSignal
+            await OneSignal.init(config);
+            console.log('🔔 OneSignal SDK v16 initialized successfully');
+            
+            // Make OneSignal available globally for our notification manager
+            window.OneSignal = OneSignal;
+          });
+          
+        } catch (error) {
+          console.error('🔔 Error in initializeOneSignal:', error);
+        }
+      }
+
+      // Start initialization when page loads
+      window.addEventListener('load', initializeOneSignal);
+    </script>
+    
+    <!-- Primary Meta Tags -->
+    <title>Pydah Hostel Digital | Online Hostel Portal</title>
+    <meta name="title" content="Pydah Hostel Digital | Online Hostel Portal">
+    <meta name="description" content="Pydah Hostel's official digital platform for hostel operations and student services. Submit and track hostel-related requests online. Quick resolution for maintenance, canteen, internet, and other hostel services. A Pydah Soft Product.">
+    <meta name="keywords" content="Pydah Hostel, Hostel Digital, Pydah College Hostel, Hostel Operations, Hostel Services, Online Hostel Portal, Student Services, Pydah Soft">
+    <meta name="author" content="Pydah Educational Institutions">
+    <meta name="robots" content="index, follow">
+    <meta name="generator" content="Pydah Soft">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://pydah.edu.in/">
+    <meta property="og:title" content="Pydah Hostel Digital | Online Hostel Portal">
+    <meta property="og:description" content="Pydah Hostel's official digital platform for hostel operations and student services. Submit and track hostel-related requests online. Quick resolution for maintenance, canteen, internet, and other hostel services. A Pydah Soft Product.">
+    <meta property="og:image" content="https://hostel.pydah.edu/og-image.jpg">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://hostel.pydah.edu/">
+    <meta property="twitter:title" content="Pydah Hostel Digital | Online Hostel Portal">
+    <meta property="twitter:description" content="Pydah Hostel's official digital platform for hostel operations and student services. Submit and track hostel-related requests online. Quick resolution for maintenance, canteen, internet, and other hostel services. A Pydah Soft Product.">
+    <meta property="twitter:image" content="https://hostel.pydah.edu/og-image.jpg">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://hostel.pydah.edu/">
+    
+    <!-- Preconnect to important domains -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Structured Data for Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Pydah Educational Institutions",
+      "url": "https://pydah.edu",
+      "logo": "https://hostel.pydah.edu/logo.png",
+      "sameAs": [
+        "https://www.facebook.com/pydahcollege",
+        "https://twitter.com/pydahcollege",
+        "https://www.instagram.com/pydahcollege"
+      ],
+      "brand": {
+        "@type": "Brand",
+        "name": "Pydah Soft",
+        "description": "Software solutions by Pydah Educational Institutions"
+      }
+    }
+    </script>
+    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+    
+    <!-- PWA Service Worker Registration -->
+    <script>
+      // Register service worker for PWA functionality
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('SW registered: ', registration);
+            })
+            .catch((registrationError) => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+      
+      // Handle beforeinstallprompt for PWA installation
+      let deferredPrompt;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent Chrome 67 and earlier from automatically showing the prompt
+        e.preventDefault();
+        // Stash the event so it can be triggered later
+        deferredPrompt = e;
+        // Show install prompt to user
+        showInstallPrompt();
+      });
+      
+      function showInstallPrompt() {
+        // You can show a custom install button here
+        console.log('PWA install prompt available');
+        // Example: show a custom install button
+        // document.getElementById('install-button').style.display = 'block';
+      }
+      
+      function installPWA() {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+              console.log('User accepted the install prompt');
+            } else {
+              console.log('User dismissed the install prompt');
+            }
+            deferredPrompt = null;
+          });
+        }
+      }
+      
+      // Make installPWA available globally
+      window.installPWA = installPWA;
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <!-- Pydah Universal Portal Switcher & SSO Loader CDN -->
+    <script 
+      id="pydah-portal-switcher-cdn"
+      src="https://crm.pydah.edu.in/portal-switcher.js" 
+      data-current-portal="hostel-automation"
+      data-api-base-url="https://crm.pydah.edu.in"
+      data-landing-url="https://crm.pydah.edu.in"
+      data-position="bottom-right"
+      async>
+    </script>
+  </body>
+</html> 

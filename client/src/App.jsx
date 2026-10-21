@@ -1,0 +1,417 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { GlobalSettingsProvider } from './context/GlobalSettingsContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import ProtectedSection from './components/ProtectedSection';
+import React from 'react';
+import { HelmetProvider } from 'react-helmet-async';
+import RouteLoading from './components/RouteLoading';
+import LeaveQRDetails from './pages/student/LeaveQRDetails';
+import SecurityDashboard from './pages/security/SecurityDashboard';
+import PushNotificationInitializer from './components/PushNotificationInitializer';
+import MenuManagement from './pages/admin/MenuManagement';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
+import DynamicManifest from './components/DynamicManifest';
+import Home from './pages/Home.jsx';
+import HomeAlt from './pages/HomeAlt.jsx';
+import IOSErrorBoundary from './components/IOSErrorBoundary';
+import IOSDebugPanel from './components/IOSDebugPanel';
+import PortalSwitcher from './components/PortalSwitcher';
+import SSOHandler from './components/SSOHandler';
+
+// Lazy load components
+const Login = lazy(() => import('./pages/Login'));
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const StudentDashboard = lazy(() => import('./pages/student/Dashboard'));
+const WardenDashboard = lazy(() => import('./pages/warden/WardenDashboard'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+
+// Public components
+const StudentPreRegistration = lazy(() => import('./pages/public/StudentPreRegistration'));
+const PreRegistrationSuccess = lazy(() => import('./pages/public/PreRegistrationSuccess'));
+const UploadPastPayments = lazy(() => import('./pages/public/UploadPastPayments'));
+
+// Admin components
+const Students = lazy(() => import('./pages/admin/Students'));
+const StudentRegistrationSQL = lazy(() => import('./pages/admin/StudentRegistrationSQL'));
+const AdmitCards = lazy(() => import('./pages/admin/AdmitCards'));
+const ApplicationExpirySettings = lazy(() => import('./pages/admin/ApplicationExpirySettings'));
+const Complaints = lazy(() => import('./pages/admin/Complaints'));
+const FoundLostManagement = lazy(() => import('./pages/admin/FoundLostManagement'));
+const Announcements = lazy(() => import('./pages/admin/Announcements'));
+const Notifications = lazy(() => import('./pages/admin/Notifications'));
+const DashboardHome = lazy(() => import('./pages/admin/DashboardHome'));
+const PollManagement = lazy(() => import('./pages/admin/PollManagement'));
+const RoomManagement = lazy(() => import('./pages/admin/RoomManagement'));
+const ElectricityBills = lazy(() => import('./pages/admin/ElectricityBills'));
+const LeaveManagement = lazy(() => import('./pages/admin/LeaveManagement'));
+const MemberManagement = lazy(() => import('./pages/admin/MemberManagement'));
+const AdminManagement = lazy(() => import('./pages/admin/AdminManagement'));
+const CourseManagement = lazy(() => import('./pages/admin/CourseManagement'));
+const Attendance = lazy(() => import('./pages/admin/Attendance'));
+const AdminFeeManagement = lazy(() => import('./pages/admin/FeeManagement'));
+const AdminFeeStructureManagement = lazy(() => import('./pages/admin/FeeStructureManagement'));
+const PaymentRecords = lazy(() => import('./pages/admin/PaymentRecords'));
+const FeatureControls = lazy(() => import('./pages/admin/FeatureControls'));
+const SecuritySettings = lazy(() => import('./pages/admin/SecuritySettings'));
+const StaffGuestsManagement = lazy(() => import('./pages/admin/StaffGuestsManagement'));
+const GlobalSettings = lazy(() => import('./pages/admin/GlobalSettings'));
+const NOCManagement = lazy(() => import('./pages/admin/NOCManagement'));
+const StudentCountReports = lazy(() => import('./pages/admin/StudentCountReports'));
+// Student components
+const ResetPassword = lazy(() => import('./pages/student/ResetPassword'));
+const PaymentHistory = lazy(() => import('./pages/student/PaymentHistory'));
+const PaymentStatus = lazy(() => import('./pages/student/PaymentStatus'));
+
+// Warden components
+const WardenHome = lazy(() => import('./pages/warden/WardenHome'));
+const WardenTakeAttendance = lazy(() => import('./pages/warden/TakeAttendance'));
+const WardenViewAttendance = lazy(() => import('./pages/warden/ViewAttendance'));
+const BulkOuting = lazy(() => import('./pages/warden/BulkOuting'));
+const WardenRaiseComplaint = lazy(() => import('./pages/warden/WardenRaiseComplaint'));
+const WardenViewComplaints = lazy(() => import('./pages/warden/WardenViewComplaints'));
+const WardenNotifications = lazy(() => import('./pages/warden/Notifications'));
+const StayInHostelRequests = lazy(() => import('./pages/warden/StayInHostelRequests'));
+const WardenFeeManagement = lazy(() => import('./pages/warden/FeeManagement'));
+const WardenLeaveManagement = lazy(() => import('./pages/warden/LeaveManagement'));
+const WardenApplyLeaveOnBehalf = lazy(() => import('./pages/warden/ApplyLeaveOnBehalf'));
+const WardenElectricityBills = lazy(() => import('./pages/warden/ElectricityBills'));
+const WardenTakeStaffAttendance = lazy(() => import('./pages/warden/TakeStaffAttendance'));
+const WardenNOCManagement = lazy(() => import('./pages/warden/NOCManagement'));
+const WardenRoomChangeRequests = lazy(() => import('./pages/warden/RoomChangeRequests'));
+const WardenCategoryChangeRequests = lazy(() => import('./pages/warden/CategoryChangeRequests'));
+
+// Principal components
+const PrincipalDashboard = lazy(() => import('./pages/principal/Dashboard'));
+const PrincipalHome = lazy(() => import('./pages/principal/PrincipalHome'));
+const PrincipalAttendance = lazy(() => import('./pages/principal/PrincipalAttendance'));
+const PrincipalStudents = lazy(() => import('./pages/principal/Students'));
+const PrincipalViewComplaints = lazy(() => import('./pages/principal/PrincipalViewComplaints'));
+const PrincipalStayInHostelRequests = lazy(() => import('./pages/principal/StayInHostelRequests'));
+const PrincipalLeaveManagement = lazy(() => import('./pages/principal/LeaveManagement'));
+
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-100">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">Something went wrong</h1>
+            <p className="text-gray-600 mb-4">Please refresh the page or try again later.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function App() {
+  return (
+    <HelmetProvider>
+      <ErrorBoundary>
+        <IOSErrorBoundary>
+          <GlobalSettingsProvider>
+            <AuthProvider>
+            <PushNotificationInitializer />
+            <DynamicManifest />
+            <SSOHandler />
+            <PortalSwitcher />
+            <Suspense fallback={<RouteLoading />}>
+              <Routes>
+                {/* Home page */}
+                <Route path="/" element={<Home />} />
+                <Route path="/home-alt" element={<HomeAlt />} />
+
+                {/* Public routes */}
+                <Route path="/login" element={<Login />} />
+                <Route path="leave/qr/:id" element={<LeaveQRDetails />} />
+                <Route path="/student/preregister" element={<StudentPreRegistration />} />
+                <Route path="/student/preregister/success" element={<PreRegistrationSuccess />} />
+                <Route path="/upload-past-payments" element={<UploadPastPayments />} />
+
+                {/* Protected admin routes */}
+                <Route
+                  path="/admin"
+                  element={<Navigate to="/admin/dashboard" replace />}
+                />
+                <Route
+                  path="/admin/dashboard/*"
+                  element={
+                    <ProtectedRoute requireAuth={true} role="admin">
+                      <AdminDashboard />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={
+                    <ProtectedSection permission="dashboard_home" sectionName="Dashboard Home">
+                      <DashboardHome />
+                    </ProtectedSection>
+                  } />
+                  <Route path="rooms/management" element={
+                    <ProtectedSection permission="room_management" sectionName="Room Management">
+                      <RoomManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="rooms/electricity" element={
+                    <ProtectedSection permission="room_management" sectionName="Electricity Bills">
+                      <ElectricityBills />
+                    </ProtectedSection>
+                  } />
+                  <Route path="rooms" element={<Navigate to="/admin/dashboard/rooms/management" replace />} />
+                  <Route path="students" element={
+                    <ProtectedSection permission="student_management" sectionName="Student Management">
+                      <Students />
+                    </ProtectedSection>
+                  } />
+                  <Route path="students/register-from-sql" element={
+                    <ProtectedSection permission="student_management" sectionName="Register Student from SQL">
+                      <StudentRegistrationSQL />
+                    </ProtectedSection>
+                  } />
+                  <Route path="students/admit-cards" element={
+                    <ProtectedSection permission="student_management" sectionName="Admit Cards">
+                      <AdmitCards />
+                    </ProtectedSection>
+                  } />
+                  <Route path="students/preregistration-requests" element={
+                    <Navigate to="/admin/dashboard/students/register-from-sql" replace />
+                  } />
+                  <Route path="students/application-expiry-settings" element={
+                    <ProtectedSection permission="student_management" sectionName="Application Expiry Settings">
+                      <ApplicationExpirySettings />
+                    </ProtectedSection>
+                  } />
+                  <Route path="complaints" element={
+                    <ProtectedSection permission="maintenance_ticket_management" sectionName="Complaints">
+                      <Complaints />
+                    </ProtectedSection>
+                  } />
+                  <Route path="complaints/details/:id" element={
+                    <ProtectedSection permission="maintenance_ticket_management" sectionName="Complaints">
+                      <Complaints />
+                    </ProtectedSection>
+                  } />
+                  <Route path="foundlost" element={
+                    <ProtectedSection permission="found_lost_management" sectionName="Found & Lost Management">
+                      <FoundLostManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="announcements" element={
+                    <ProtectedSection permission="announcement_management" sectionName="Announcements">
+                      <Announcements />
+                    </ProtectedSection>
+                  } />
+                  <Route path="notifications" element={<Notifications />} />
+                  <Route path="members" element={
+                    <ProtectedSection permission="maintenance_ticket_management" sectionName="Member Management">
+                      <MemberManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="polls" element={
+                    <ProtectedSection permission="poll_management" sectionName="Polls">
+                      <PollManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="leave" element={
+                    <ProtectedSection permission="leave_management" sectionName="Leave Management">
+                      <LeaveManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="course-management" element={
+                    <ProtectedSection permission="course_management" sectionName="Course Management">
+                      <CourseManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="admin-management" element={
+                    <ProtectedSection permission="super_admin" sectionName="Admin Management">
+                      <AdminManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="cafeteria/menu" element={
+                    <ProtectedSection permission="menu_management" sectionName="Menu Management">
+                      <MenuManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="attendance" element={
+                    <ProtectedSection permission="attendance_management" sectionName="Attendance Management">
+                      <Attendance />
+                    </ProtectedSection>
+                  } />
+                  <Route path="fee-management" element={
+                    <ProtectedSection permission="fee_management" sectionName="Fee Management">
+                      <AdminFeeManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="fee-management/structure" element={
+                    <ProtectedSection permission="fee_management" sectionName="Fee Structure Management">
+                      <AdminFeeStructureManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="fee-management/payment-records" element={
+                    <ProtectedSection permission="fee_management" sectionName="Payment Records">
+                      <PaymentRecords />
+                    </ProtectedSection>
+                  } />
+                  <Route path="feature-controls" element={
+                    <ProtectedSection permission="feature_controls" sectionName="Feature Controls">
+                      <FeatureControls />
+                    </ProtectedSection>
+                  } />
+                  <Route path="security" element={
+                    <ProtectedSection permission="security_management" sectionName="Security Dashboard">
+                      <SecurityDashboard />
+                    </ProtectedSection>
+                  } />
+                  <Route path="security/settings" element={
+                    <ProtectedSection permission="security_management" sectionName="Security Settings" requiredAccess="full">
+                      <SecuritySettings />
+                    </ProtectedSection>
+                  } />
+                  <Route path="staff-guests" element={
+                    <ProtectedSection permission="staff_guests_management" sectionName="Staff/Guests Management">
+                      <StaffGuestsManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="global-settings" element={
+                    <ProtectedSection permission="global_settings" sectionName="Global Settings" requiredAccess="full">
+                      <GlobalSettings />
+                    </ProtectedSection>
+                  } />
+                  <Route path="noc-management" element={
+                    <ProtectedSection permission="noc_management" sectionName="NOC Management">
+                      <NOCManagement />
+                    </ProtectedSection>
+                  } />
+                  <Route path="reports" element={
+                    <ProtectedSection permission="student_management" sectionName="Student Reports">
+                      <StudentCountReports />
+                    </ProtectedSection>
+                  } />
+                </Route>
+
+                {/* Protected warden routes */}
+                <Route
+                  path="/warden"
+                  element={<Navigate to="/warden/dashboard" replace />}
+                />
+                <Route
+                  path="/warden/dashboard/*"
+                  element={
+                    <ProtectedRoute requireAuth={true} role="warden">
+                      <WardenDashboard />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<WardenHome />} />
+                  <Route path="take-attendance" element={<WardenTakeAttendance />} />
+                  <Route path="view-attendance" element={<WardenViewAttendance />} />
+                  <Route path="bulk-outing" element={<BulkOuting />} />
+                  <Route path="complaints/raise" element={<WardenRaiseComplaint />} />
+                  <Route path="complaints/view" element={<WardenViewComplaints />} />
+                  <Route path="notifications" element={<WardenNotifications />} />
+                  <Route path="leave-management" element={<WardenLeaveManagement />} />
+                  <Route path="leave-management/apply-on-behalf" element={<WardenApplyLeaveOnBehalf />} />
+                  <Route path="stay-in-hostel-requests" element={<StayInHostelRequests />} />
+                  <Route path="fee-management" element={<WardenFeeManagement />} />
+                  <Route path="electricity-bills" element={<WardenElectricityBills />} />
+                  <Route path="take-staff-attendance" element={<WardenTakeStaffAttendance />} />
+                  <Route path="noc-management" element={<WardenNOCManagement />} />
+                  <Route path="room-change-requests" element={<WardenRoomChangeRequests />} />
+                  <Route path="category-change-requests" element={<WardenCategoryChangeRequests />} />
+                </Route>
+
+                {/* Protected principal routes */}
+                <Route
+                  path="/principal"
+                  element={<Navigate to="/principal/dashboard" replace />}
+                />
+                <Route
+                  path="/principal/dashboard/*"
+                  element={
+                    <ProtectedRoute requireAuth={true} role="principal">
+                      <PrincipalDashboard />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<PrincipalHome />} />
+                  <Route path="attendance" element={<PrincipalAttendance />} />
+                  <Route path="students" element={<PrincipalStudents />} />
+                  <Route path="complaints" element={<PrincipalViewComplaints />} />
+                  <Route path="leave-management" element={<PrincipalLeaveManagement />} />
+                  <Route path="stay-in-hostel-requests" element={<PrincipalStayInHostelRequests />} />
+                  <Route path="reports" element={
+                    <ProtectedSection permission="student_management" sectionName="Student Reports">
+                      <StudentCountReports />
+                    </ProtectedSection>
+                  } />
+                </Route>
+
+                {/* Student reset password route (optional — change password from profile is preferred) */}
+                <Route
+                  path="/student/reset-password"
+                  element={
+                    <ProtectedRoute requireAuth={true}>
+                      <ResetPassword />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* Protected student routes */}
+                <Route
+                  path="/student/*"
+                  element={
+                    <ProtectedRoute requireAuth={true}>
+                      <StudentDashboard />
+                    </ProtectedRoute>
+                  }
+                />
+
+                <Route
+                  path="/student/payment-status/:billId?"
+                  element={
+                    <ProtectedRoute requireAuth={true}>
+                      <PaymentStatus />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* 404 */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </AuthProvider>
+          </GlobalSettingsProvider>
+        </IOSErrorBoundary>
+
+        {/* iOS Debug Panel - always available on iOS devices */}
+        <IOSDebugPanel />
+        <PWAInstallPrompt />
+      </ErrorBoundary>
+    </HelmetProvider>
+  );
+}
+
+export default App;
