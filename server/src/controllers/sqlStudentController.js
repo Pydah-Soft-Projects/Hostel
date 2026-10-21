@@ -1,0 +1,222 @@
+import { fetchStudentByIdentifier, testSQLConnection, fetchCollegesFromSQL } from '../utils/sqlService.js';
+import { matchCourseAndBranch } from '../utils/courseBranchMatcher.js';
+import { normalizeBatchToYear } from '../utils/batchUtils.js';
+import { createError } from '../utils/error.js';
+import { formatSqlStudentPhoto } from '../utils/studentPhotoService.js';
+import User from '../models/User.js';
+import HostelRequest from '../models/HostelRequest.js';
+
+/**
+ * Map SQL gender to MongoDB gender format
+ */
+const mapGender = (sqlGender) => {
+  if (!sqlGender) return null;
+
+  const normalized = sqlGender.toString().trim().toUpperCase();
+  if (['M', 'MALE', 'BOY'].includes(normalized)) return 'Male';
+  if (['F', 'FEMALE', 'GIRL'].includes(normalized)) return 'Female';
+  return null;
+};
+
+/**
+ * Map SQL student data to MongoDB format
+ */
+const mapStudentData = (sqlData) => {
+  const studentPhoto = formatSqlStudentPhoto(sqlData.student_photo);
+
+  return {
+    // Basic info
+    name: sqlData.student_name || '',
+    rollNumber: sqlData.pin_no || sqlData.admission_number || sqlData.admission_no || '',
+    admissionNumber: sqlData.admission_number || sqlData.admission_no || null,
+    
+    // Academic info
+    course: sqlData.course || '',
+    branch: sqlData.branch || '',
+    year: sqlData.current_year || 1,
+    batch: normalizeBatchToYear(sqlData.batch),
+    
+    // Personal info
+    gender: mapGender(sqlData.gender),
+    studentPhone: sqlData.student_mobile || '',
+    parentPhone: sqlData.parent_mobile1 || '',
+    motherPhone: sqlData.parent_mobile2 || '',
+    fatherName: sqlData.father_name || '',
+    
+    // Additional info
+    email: null, // Email not in SQL schema, will be empty
+    dob: sqlData.dob || null,
+    adharNo: sqlData.adhar_no || null,
+    address: sqlData.student_address || null,
+    city: sqlData.city_village || null,
+    district: sqlData.district || null,
+    
+    // Photo from SQL
+    studentPhoto: studentPhoto,
+    
+    // Raw SQL data for reference
+    rawSQLData: sqlData
+  };
+};
+
+/**
+ * Fetch student from SQL and map to MongoDB format
+ */
+export const fetchStudentFromSQL = async (req, res, next) => {
+  try {
+    const { identifier } = req.params;
+    
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        message: 'Identifier (PIN number or Admission number) is required'
+      });
+    }
+    
+    // Test SQL connection first
+    const connectionTest = await testSQLConnection();
+    if (!connectionTest.success) {
+      return res.status(503).json({
+        success: false,
+        message: 'SQL database connection failed',
+        error: connectionTest.error
+      });
+    }
+    
+    // Fetch student from SQL
+    const result = await fetchStudentByIdentifier(identifier);
+    
+    if (!result.success) {
+      return res.status(404).json({
+        success: false,
+        message: result.error || 'Student not found in central database'
+      });
+    }
+    
+    const sqlData = result.data;
+    
+    // Map SQL data to MongoDB format
+    const mappedData = mapStudentData(sqlData);
+    
+    // Match course and branch
+    let courseMatch = null;
+    let branchMatch = null;
+    
+    if (mappedData.course) {
+      courseMatch = await matchCourseAndBranch(mappedData.course, mappedData.branch);
+      
+      if (courseMatch.success) {
+        mappedData.courseId = courseMatch.courseId;
+        mappedData.courseName = courseMatch.courseName;
+        mappedData.branchId = courseMatch.branchId;
+        mappedData.branchName = courseMatch.branchName;
+        mappedData.college = courseMatch.college; // Add college data
+        mappedData.courseMatchType = courseMatch.courseMatchType;
+        mappedData.branchMatchType = courseMatch.branchMatchType;
+      } else {
+        // Course/branch matching failed, but still return the data
+        mappedData.courseMatchError = courseMatch.error;
+        mappedData.courseSuggestions = courseMatch.courseSuggestions;
+        mappedData.branchSuggestions = courseMatch.branchSuggestions;
+      }
+    }
+    
+    // Check if student already has an existing active request or registration in HMS
+    const identifiers = [...new Set([
+      mappedData.rollNumber,
+      mappedData.admissionNumber,
+      identifier
+    ].map(id => id ? String(id).trim().toUpperCase() : null).filter(Boolean))];
+
+    const [existingUser, existingHostelRequest] = await Promise.all([
+      User.findOne({
+        $or: [
+          { rollNumber: { $in: identifiers } },
+          { admissionNumber: { $in: identifiers } }
+        ],
+        role: 'student'
+      }).select('name rollNumber admissionNumber applicationStatus academicYear roomNumber hostelId').lean(),
+      HostelRequest.findOne({
+        $or: [
+          { admissionNumber: { $in: identifiers } },
+          { sdmsRollNumber: { $in: identifiers } }
+        ],
+        status: 'active'
+      }).select('admissionNumber sdmsRollNumber academicYear roomNumber hostelSequenceId status').lean()
+    ]);
+
+    const hasExistingRequest = Boolean(
+      existingHostelRequest || (existingUser && ['Active', 'Extended'].includes(existingUser.applicationStatus))
+    );
+
+    mappedData.hasExistingRequest = hasExistingRequest;
+    if (hasExistingRequest) {
+      mappedData.existingRequest = {
+        academicYear: existingHostelRequest?.academicYear || existingUser?.academicYear || 'N/A',
+        roomNumber: existingHostelRequest?.roomNumber || existingUser?.roomNumber || 'N/A',
+        status: existingHostelRequest?.status || existingUser?.applicationStatus || 'Active',
+        hostelSequenceId: existingHostelRequest?.hostelSequenceId || null,
+        message: 'Request for this student already exist'
+      };
+    }
+    
+    res.json({
+      success: true,
+      data: mappedData,
+      message: 'Student data fetched successfully from SQL database'
+    });
+  } catch (error) {
+    console.error('❌ Error in fetchStudentFromSQL:', error);
+    next(createError(500, 'Error fetching student from SQL database', error.message));
+  }
+};
+
+/**
+ * Test SQL connection
+ */
+export const testConnection = async (req, res, next) => {
+  try {
+    const result = await testSQLConnection();
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'SQL connection successful'
+      });
+    } else {
+      res.status(503).json({
+        success: false,
+        message: 'SQL connection failed',
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error testing SQL connection:', error);
+    next(createError(500, 'Error testing SQL connection', error.message));
+  }
+};
+
+/**
+ * Fetch all colleges from SQL
+ */
+export const getColleges = async (req, res, next) => {
+  try {
+    const result = await fetchCollegesFromSQL();
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        data: result.data
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch colleges from SQL',
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error in getColleges:', error);
+    next(createError(500, 'Error fetching colleges from SQL', error.message));
+  }
+};

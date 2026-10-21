@@ -1,0 +1,145 @@
+import express from 'express';
+import { 
+  createLeaveRequest, 
+  getStudentLeaveRequests, 
+  getAllLeaveRequests, 
+  verifyOTPAndApprove, 
+  rejectLeaveRequest, 
+  getLeaveById,
+  getApprovedLeaves,
+  updateVerificationStatus,
+  requestQrView,
+  requestIncomingQrView,
+  recordVisit,
+  recordIncomingVisit,
+  getStayInHostelRequestsForWarden,
+  getStayInHostelRequestsForPrincipal,
+  wardenRecommendation,
+  principalDecision,
+  getWardenLeaveRequests,
+  wardenVerifyOTP,
+  wardenRejectLeave,
+  getPrincipalLeaveRequests,
+  principalApproveLeave,
+  principalRejectLeave,
+  getStudentLeaveHistory,
+  deleteLeaveRequest,
+  resendOTP,
+  getOTP,
+  cleanupExpiredLeaves,
+  createLeaveRequestOnBehalf
+} from '../controllers/leaveController.js';
+import { adminAuth, authenticateStudent, protect, wardenAuth, principalAuth } from '../middleware/authMiddleware.js';
+
+const router = express.Router();
+
+// Debug middleware removed to prevent console spam
+// Uncomment below if debugging is needed:
+// router.use((req, res, next) => {
+//   console.log(`🔍 Leave route accessed: ${req.method} ${req.path}`);
+//   next();
+// });
+
+// Redirect base leave route to stats or similar (can be customized)
+router.get('/', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'Leave routes are working', 
+    timestamp: new Date() 
+  });
+});
+
+// Test route to verify server is working
+router.get('/test', (req, res) => {
+  console.log('✅ Test route accessed');
+  res.json({ 
+    message: 'Leave routes are working', 
+    timestamp: new Date().toISOString(),
+    method: req.method,
+    path: req.path
+  });
+});
+
+// Student routes
+router.post('/create', protect, authenticateStudent, createLeaveRequest);
+router.get('/my-requests', protect, authenticateStudent, getStudentLeaveRequests);
+router.delete('/:id', protect, authenticateStudent, deleteLeaveRequest);
+router.post('/resend-otp', protect, authenticateStudent, resendOTP);
+
+// Admin routes - removed 'protect' middleware
+router.get('/all', adminAuth, getAllLeaveRequests);
+router.post('/verify-otp', adminAuth, verifyOTPAndApprove);
+router.post('/getOtp', adminAuth, getOTP);
+router.post('/reject', adminAuth, rejectLeaveRequest);
+
+// Warden routes for Leave Management
+router.get('/warden/all', wardenAuth, getWardenLeaveRequests);
+router.post('/warden/verify-otp', wardenAuth, wardenVerifyOTP);
+router.post('/warden/reject', wardenAuth, wardenRejectLeave);
+router.post('/warden/apply-on-behalf', wardenAuth, createLeaveRequestOnBehalf);
+
+// Warden routes for Stay in Hostel requests
+router.get('/warden/stay-in-hostel', wardenAuth, getStayInHostelRequestsForWarden);
+router.post('/warden/recommendation', wardenAuth, wardenRecommendation);
+
+// Principal routes for Leave Management
+router.get('/principal/all', principalAuth, getPrincipalLeaveRequests);
+router.post('/principal/approve', principalAuth, principalApproveLeave);
+router.post('/principal/reject', principalAuth, principalRejectLeave);
+
+// Principal route for student leave history
+router.get('/student/:studentId/history', principalAuth, getStudentLeaveHistory);
+
+// Principal routes for Stay in Hostel requests
+router.get('/principal/stay-in-hostel', principalAuth, getStayInHostelRequestsForPrincipal);
+router.post('/principal/decision', principalAuth, principalDecision);
+
+// // Get OTP from the Leave request (for testing purposes)
+// export const getOTP = async (req, res, next) => {
+//   try {
+//     const { leaveId } = req.body;
+//     const leave = await Leave.findById(leaveId);
+//     if (!leave) {
+//       throw createError(404, 'Leave request not found');
+//     }
+//     res.status(200).json({
+//       success: true,
+//       message: 'OTP retrieved successfully',
+//       data: {
+//         otp: leave.otpCode
+//       }
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// Security guard routes (public access)
+router.get('/approved', getApprovedLeaves);
+router.post('/verify', updateVerificationStatus);
+
+// Student QR view limit route
+router.post('/qr-view/:id', protect, authenticateStudent, requestQrView);
+
+// Student incoming QR view route
+router.post('/incoming-qr-view/:id', protect, authenticateStudent, requestIncomingQrView);
+
+// QR scanning route that records visits (public access)
+router.post('/qr/:id', recordVisit);
+
+// Incoming QR scanning route that records incoming visits (public access)
+router.post('/incoming-qr/:id', recordIncomingVisit);
+
+// Visit recording route
+router.post('/:id/record-visit', recordVisit);
+
+// Incoming visit recording route
+router.post('/:id/record-incoming-visit', recordIncomingVisit);
+
+// Public route for QR scanning (must be last to avoid conflicts)
+router.get('/:id', getLeaveById);
+
+// Cleanup expired leaves route (for cron jobs)
+router.post('/cleanup-expired', adminAuth, cleanupExpiredLeaves);
+
+export default router;

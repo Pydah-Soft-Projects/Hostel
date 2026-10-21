@@ -1,0 +1,3941 @@
+import User, { COURSES } from '../models/User.js';
+import Complaint from '../models/Complaint.js';
+import Leave from '../models/Leave.js';
+import Room from '../models/Room.js';
+import ElectricityBill from '../models/ElectricityBill.js';
+import Hostel from '../models/Hostel.js';
+import HostelCategory from '../models/HostelCategory.js';
+import SecuritySettings from '../models/SecuritySettings.js';
+import FeeReminder from '../models/FeeReminder.js';
+import RoomOccupancyHistory from '../models/RoomOccupancyHistory.js';
+import NOC from '../models/NOC.js';
+import { createError } from '../utils/error.js';
+import { uploadToS3, deleteFromS3 } from '../utils/s3Service.js';
+import { sendPasswordResetEmail } from '../utils/emailService.js';
+import Branch from '../models/Branch.js';
+import Course from '../models/Course.js';
+import Counter from '../models/Counter.js';
+import axios from 'axios';
+import { fetchStudentByIdentifier, testSQLConnection } from '../utils/sqlService.js';
+import { normalizeBatchToYear, getBatchEndYear, validateAcademicYearForBatch } from '../utils/batchUtils.js';
+import {
+  enrichStudentAcademics,
+  enrichStudentsAcademics,
+  parseSqlStudentRow,
+  matchesAcademicFilters,
+  repairMissingRollNumber
+} from '../utils/studentAcademicEnricher.js';
+import {
+  closeActiveOccupancyHistory,
+  removeStudentEnrollmentForAcademicYear,
+  attachResolvedExpiryDates,
+  fetchStudentsForAcademicYear,
+  isLeftDateDue,
+  expireHostelRequestByLeftDate
+} from '../utils/applicationExpiryService.js';
+import {
+  getOccupiedBedsAndLockersForAcademicYear,
+  countStudentsInRoomForAcademicYear,
+  isBedOccupiedForAcademicYear,
+  isLockerOccupiedForAcademicYear,
+  countActiveHostelRequestsForYear,
+  countAllLiveActiveHostelRequests,
+  countAllHostelRequestsForYear
+} from '../utils/roomOccupancyUtils.js';
+import { photoToBase64ForExport } from '../utils/studentPhotoService.js';
+import {
+  syncStudentHostelFeeSafely,
+  deleteAllStudentHostelFeesSafely,
+  resolveFeesStudentId
+} from '../services/feesSyncService.js';
+import {
+  createYearlyHostelRequest,
+  closeActiveHostelRequestForUser,
+  updateActiveRequestAllocationForAdmission,
+  updateStayDatesForAdmission
+} from '../services/hostelRequestService.js';
+import HostelRequest from '../models/HostelRequest.js';
+import {
+  normalizeAdmissionNumber,
+  overlayStudentWithHostelRequest,
+  applyActiveHostelRequestOverlay,
+  resolveCategoryNameForPrint
+} from '../utils/hostelRequestListDto.js';
+import { dedupeStudentsByIdentity } from '../utils/studentListDedupe.js';
+
+// Helper function to fetch image and convert to base64
+const fetchImageAsBase64 = async (imageUrl) => {
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000
+    });
+    
+    const buffer = Buffer.from(response.data, 'binary');
+    const base64 = buffer.toString('base64');
+    const mimeType = response.headers['content-type'] || 'image/jpeg';
+    
+    return `data:${mimeType};base64,${base64}`;
+  } catch (error) {
+    console.error('Error fetching image:', error);
+    return null;
+  }
+};
+
+// Function to generate hostel ID (imported from studentController)
+const generateHostelId = async (gender) => {
+  console.log('🔧 Generating hostel ID for gender:', gender);
+  
+  const currentYear = new Date().getFullYear().toString().slice(-2); // Get last 2 digits of year
+  const prefix = gender === 'Male' ? 'BH' : 'GH';
+  
+  console.log('📅 Current year:', currentYear, 'Prefix:', prefix, 'Gender:', gender);
+  
+  // Use a counter collection to ensure atomic sequence generation
+  const counterId = `hostel_${prefix}${currentYear}`;
+  
+  // Use findOneAndUpdate with upsert to atomically increment the counter
+  const counter = await Counter.findOneAndUpdate(
+    { _id: counterId },
+    { $inc: { sequence: 1 } },
+    { 
+      new: true, 
+      upsert: true,
+      setDefaultsOnInsert: true 
+    }
+  );
+  
+  const sequence = counter.sequence;
+  const hostelId = `${prefix}${currentYear}${sequence.toString().padStart(3, '0')}`;
+  console.log('Generated hostel ID:', hostelId);
+  
+  // Format: BH25001, GH25002, etc.
+  return hostelId;
+};
+
+/**
+ * Phase 2 dual-write: ensure StudentMaster + HostelRequest exist for this AY.
+ * Does not replace User writes yet. Safe to call after User save.
+ * skipOccupancyChecks=true because addStudent already validated via legacy utils.
+ */
+const dualWriteHostelRequest = async ({
+  student,
+  academicYear,
+  hostel,
+  hostelCategory,
+  roomDoc,
+  roomNumber,
+  bedNumber,
+  lockerNumber,
+  mealType,
+  parentPermissionForOuting,
+  concession,
+  sqlAcademics,
+  adminId
+}) => {
+  const admission = (student.admissionNumber || sqlAcademics?.admissionNumber || '')
+    .toString()
+    .trim()
+    .toUpperCase();
+  if (!admission) {
+    console.warn('⚠️ dualWriteHostelRequest skipped: missing admissionNumber');
+    return null;
+  }
+
+  const existing = await HostelRequest.findOne({ admissionNumber: admission, academicYear });
+  if (existing) {
+    console.log(`ℹ️ HostelRequest already exists for ${admission} / ${academicYear}`);
+    return existing;
+  }
+
+  const hostelDoc = await Hostel.findById(hostel).select('code name');
+  if (!hostelDoc?.code) {
+    throw createError(
+      400,
+      'Hostel code is required before registration. Set a code on the hostel (PUT /api/hostels/:id).'
+    );
+  }
+
+  const { hostelRequest } = await createYearlyHostelRequest({
+    admissionNumber: admission,
+    academicYear,
+    hostelId: hostel,
+    hostelCategoryId: hostelCategory,
+    roomId: roomDoc?._id,
+    roomNumber,
+    bedNumber,
+    lockerNumber,
+    mealType,
+    parentPermissionForOuting,
+    concession,
+    sdms: sqlAcademics,
+    userId: student._id,
+    adminId,
+    skipOccupancyChecks: true,
+    // Phase 3: history is audit only, emitted from the request (not a live occupancy SOT)
+    emitHistory: Boolean(roomDoc?._id && roomNumber),
+    admitDate: student.admitDate || new Date(),
+    joiningDate: student.joiningDate || null,
+    leftDate: student.leftDate || null
+  });
+
+  // Link any pre-existing unlinked history rows for this student/AY
+  await RoomOccupancyHistory.updateMany(
+    {
+      student: student._id,
+      academicYear,
+      status: { $in: ['Active', 'Extended'] },
+      allocatedTo: null,
+      $or: [{ hostelRequestId: null }, { hostelRequestId: { $exists: false } }]
+    },
+    { $set: { hostelRequestId: hostelRequest._id } }
+  );
+
+  console.log(
+    `✅ Dual-wrote HostelRequest ${hostelRequest.hostelSequenceId} for ${admission} / ${academicYear}`
+  );
+  return hostelRequest;
+};
+
+const inferGenderFromHostel = async (hostelId) => {
+  if (!hostelId) return null;
+  const hostelDoc = await Hostel.findById(hostelId).select('name').lean();
+  if (!hostelDoc?.name) return null;
+  const name = hostelDoc.name.toUpperCase();
+  if (name.includes('BOY') || name.includes('MALE') || name.includes('MEN')) return 'Male';
+  if (name.includes('GIRL') || name.includes('FEMALE') || name.includes('WOMEN')) return 'Female';
+  return null;
+};
+
+// Add a new student
+export const addStudent = async (req, res, next) => {
+  try {
+    const {
+      name,
+      rollNumber,
+      admissionNumber,
+      gender,
+      course,
+      year,
+      branch,
+      category,
+      hostel,
+      hostelCategory,
+      room,
+      mealType,
+      parentPermissionForOuting,
+      roomNumber,
+      bedNumber,
+      lockerNumber,
+      studentPhone,
+      parentPhone,
+      motherName,
+      motherPhone,
+      localGuardianName,
+      localGuardianPhone,
+      batch,
+      academicYear,
+      email,
+      concession = 0,
+      college,
+      admitDate,
+      joiningDate,
+      leftDate
+    } = req.body;
+
+    const parsedAdmitDate = admitDate ? new Date(admitDate) : new Date();
+    // Joining date is set by warden after registration (AY-wise on HostelRequest)
+    const parsedJoiningDate = joiningDate ? new Date(joiningDate) : null;
+    const parsedLeftDate = leftDate ? new Date(leftDate) : null;
+
+    const normalizedGender = normalizeGender(gender);
+
+    const rollUpper = String(rollNumber || '').trim().toUpperCase();
+    if (!rollUpper) {
+      throw createError(400, 'Roll number is required');
+    }
+
+    let existingStudent = await User.findOne({ rollNumber: rollUpper, role: 'student' });
+    let isRenewal = Boolean(
+      existingStudent && ['Expired', 'Withdrawn'].includes(existingStudent.applicationStatus)
+    );
+
+    // Validate student exists in SQL and load academics (source of truth)
+    let sqlAcademics = null;
+    try {
+      const connectionTest = await testSQLConnection();
+      if (!connectionTest.success) {
+        throw createError(503, 'SQL database connection failed. Cannot proceed with registration.', connectionTest.error);
+      }
+
+      let sqlResult = await fetchStudentByIdentifier(rollUpper);
+      if (!sqlResult.success && admissionNumber && admissionNumber.toUpperCase() !== rollUpper) {
+        sqlResult = await fetchStudentByIdentifier(admissionNumber);
+      }
+      if (!sqlResult.success) {
+        throw createError(404, 'Student not found in central database. Please verify the PIN number or Admission number.');
+      }
+
+      sqlAcademics = await parseSqlStudentRow(sqlResult.data);
+      console.log('✅ Student validated in SQL database');
+    } catch (error) {
+      // If it's already a createError, re-throw it
+      if (error.statusCode) {
+        throw error;
+      }
+      // Otherwise, wrap it
+      console.error('❌ SQL validation error:', error);
+      throw createError(500, 'Error validating student in SQL database', error.message);
+    }
+
+    const resolvedAdmissionNumber =
+      admissionNumber?.toString().trim().toUpperCase() ||
+      sqlAcademics?.admissionNumber?.toString().trim().toUpperCase() ||
+      undefined;
+
+    if (resolvedAdmissionNumber && academicYear) {
+      const existingHr = await HostelRequest.findOne({
+        admissionNumber: resolvedAdmissionNumber,
+        academicYear
+      }).select('_id status');
+      if (existingHr) {
+        throw createError(
+          400,
+          `A hostel request already exists for admission ${resolvedAdmissionNumber} in ${academicYear} (status: ${existingHr.status}).`
+        );
+      }
+
+      // A User without its required HostelRequest is an interrupted registration.
+      // Remove the incomplete identity so retrying creates a fresh password and completes
+      // the canonical HostelRequest write. Successful Phase 6 registrations always have
+      // a HostelRequest for their academic year.
+      if (
+        existingStudent &&
+        ['Active', 'Extended'].includes(existingStudent.applicationStatus)
+      ) {
+        console.warn(
+          `Cleaning incomplete registration for ${existingStudent.rollNumber}: active User has no HostelRequest for ${academicYear}`
+        );
+        await User.deleteOne({ _id: existingStudent._id });
+        existingStudent = null;
+        isRenewal = false;
+      }
+    } else if (
+      existingStudent &&
+      ['Active', 'Extended'].includes(existingStudent.applicationStatus)
+    ) {
+      throw createError(
+        400,
+        `Student is already active for academic year ${existingStudent.academicYear}. Register again only after the application expires.`
+      );
+    }
+
+    // Hostel / category (hostelCategory) validation under new hierarchy
+    if (!hostel) {
+      throw createError(400, 'Hostel is required');
+    }
+    if (!hostelCategory) {
+      throw createError(400, 'Hostel category is required');
+    }
+    if (!academicYear || !validateAcademicYear(academicYear)) {
+      throw createError(400, 'Valid academic year (YYYY-YYYY) is required');
+    }
+
+    const ayValidation = validateAcademicYearForBatch(
+      sqlAcademics?.batch || batch,
+      sqlAcademics?.year || year,
+      academicYear
+    );
+    if (!ayValidation.valid) {
+      throw createError(400, ayValidation.message);
+    }
+
+    const hostelExists = await Hostel.exists({ _id: hostel });
+    if (!hostelExists) {
+      throw createError(400, 'Invalid hostel.');
+    }
+
+    const hostelCategoryDoc = await HostelCategory.findOne({ _id: hostelCategory, hostel });
+    if (!hostelCategoryDoc) {
+      throw createError(400, 'Invalid category for the selected hostel.');
+    }
+    const finalCategoryName = category?.trim() || hostelCategoryDoc.name;
+
+    // Room is optional at registration (warden assigns later). Validate only when provided.
+    let roomDoc = null;
+    if (roomNumber) {
+      const roomQuery = { hostel, category: hostelCategory, roomNumber };
+      roomDoc = await Room.findOne(roomQuery);
+      if (!roomDoc) {
+        throw createError(400, 'Invalid room number for the selected hostel/category.');
+      }
+
+      const studentCount = await countStudentsInRoomForAcademicYear(roomDoc, academicYear);
+      if (studentCount >= roomDoc.bedCount) {
+        throw createError(400, 'Room is full. Cannot register more students.');
+      }
+
+      const excludeStudentId = isRenewal ? existingStudent._id : null;
+
+      if (bedNumber) {
+        const bedOccupied = await isBedOccupiedForAcademicYear(
+          roomDoc,
+          bedNumber,
+          academicYear,
+          excludeStudentId
+        );
+        if (bedOccupied) {
+          throw createError(400, 'Selected bed is already occupied');
+        }
+
+        const expectedBedFormat = `${roomNumber} Bed `;
+        if (!bedNumber.startsWith(expectedBedFormat)) {
+          throw createError(400, 'Invalid bed number format for this room');
+        }
+      }
+
+      if (lockerNumber) {
+        const lockerOccupied = await isLockerOccupiedForAcademicYear(
+          roomDoc,
+          lockerNumber,
+          academicYear,
+          excludeStudentId
+        );
+        if (lockerOccupied) {
+          throw createError(400, 'Selected locker is already occupied');
+        }
+
+        const expectedLockerFormat = `${roomNumber} Locker `;
+        if (!lockerNumber.startsWith(expectedLockerFormat)) {
+          throw createError(400, 'Invalid locker number format for this room');
+        }
+      }
+    }
+
+    // Calculate fees with concession
+    let calculatedTerm1Fee = 0;
+    let calculatedTerm2Fee = 0;
+    let calculatedTerm3Fee = 0;
+    let totalCalculatedFee = 0;
+    let hasRevisedFee = false;
+
+    // 1. Check overall concessions SQL table for a custom revised fee
+    try {
+      const { fetchConcessionsForStudent } = await import('../utils/sqlService.js');
+      const concessionsResult = await fetchConcessionsForStudent(rollUpper);
+      
+      if (concessionsResult.success && concessionsResult.data) {
+        const concessions = concessionsResult.data;
+        let revisedFees = concessions.revised_fees;
+        if (typeof revisedFees === 'string') {
+          try {
+            revisedFees = JSON.parse(revisedFees);
+          } catch (err) {
+            console.error('Failed to parse revised_fees JSON:', err);
+          }
+        }
+        if (Array.isArray(revisedFees)) {
+          const feeYear = sqlAcademics?.year || year;
+          const hostelRevisedFee = revisedFees.find(
+            f => f.feeHeadCode === 'HST01' && Number(f.studentYear) === Number(feeYear)
+          );
+          if (hostelRevisedFee && hostelRevisedFee.revisedAmount !== undefined && hostelRevisedFee.revisedAmount !== null) {
+            const revisedAmount = Number(hostelRevisedFee.revisedAmount);
+            let finalRevisedAmount = revisedAmount;
+
+            if (hostelRevisedFee.concessionType === 'CONCESSION') {
+              const FeeStructure = (await import('../models/FeeStructure.js')).default;
+              const feeCourse = sqlAcademics?.course || course;
+              const feeBranch = sqlAcademics?.branch || branch;
+              const feeStructure = await FeeStructure.getFeeStructure(
+                academicYear,
+                feeCourse,
+                feeBranch,
+                feeYear,
+                finalCategoryName
+              );
+              if (feeStructure) {
+                const originalFee = feeStructure.totalFee || 0;
+                finalRevisedAmount = Math.max(0, originalFee - revisedAmount);
+                console.log(`💰 [addStudent] Applying CONCESSION: Original: ₹${originalFee}, Concession: ₹${revisedAmount}, Final revised: ₹${finalRevisedAmount}`);
+              } else {
+                const feeCourse = sqlAcademics?.course || course;
+                const feeBranch = sqlAcademics?.branch || branch;
+                throw createError(
+                  400,
+                  `No hostel fee structure found for ${feeCourse}, branch ${feeBranch}, year ${feeYear}, category ${finalCategoryName}, academic year ${academicYear}. A fee structure is required to apply SQL concession during registration.`
+                );
+              }
+            }
+
+            calculatedTerm1Fee = Math.round(finalRevisedAmount * 0.4);
+            calculatedTerm2Fee = Math.round(finalRevisedAmount * 0.3);
+            calculatedTerm3Fee = Math.round(finalRevisedAmount * 0.3);
+            totalCalculatedFee = finalRevisedAmount;
+            hasRevisedFee = true;
+            console.log(`💰 [addStudent] Applying SQL overall concession/revised fee: ₹${finalRevisedAmount}`);
+          }
+        }
+      }
+    } catch (concessionError) {
+      console.error('❌ Error checking overall concessions during registration:', concessionError);
+    }
+
+    if (!hasRevisedFee) {
+      try {
+        const FeeStructure = (await import('../models/FeeStructure.js')).default;
+        const feeCourse = sqlAcademics?.course || course;
+        const feeBranch = sqlAcademics?.branch || branch;
+        const feeYear = sqlAcademics?.year || year;
+        const feeStructure = await FeeStructure.getFeeStructure(
+          academicYear,
+          feeCourse,
+          feeBranch,
+          feeYear,
+          finalCategoryName
+        );
+
+        if (!feeStructure) {
+          throw createError(
+            400,
+            `No hostel fee structure found for ${feeCourse}, branch ${feeBranch}, year ${feeYear}, category ${finalCategoryName}, academic year ${academicYear}. Please add the fee structure in Fee Management before registering this student.`
+          );
+        }
+
+        console.log('📊 Fee structure found:', feeStructure);
+        
+        // Calculate fees with concession (applied to Term 1 only, excess to Term 2)
+        const concessionAmount = Number(concession) || 0;
+        const totalOriginalFee = feeStructure.totalFee;
+        
+        // Apply concession to Term 1 first
+        calculatedTerm1Fee = Math.max(0, feeStructure.term1Fee - concessionAmount);
+        
+        // If concession exceeds Term 1 fee, apply excess to Term 2
+        let remainingConcession = Math.max(0, concessionAmount - feeStructure.term1Fee);
+        calculatedTerm2Fee = Math.max(0, feeStructure.term2Fee - remainingConcession);
+        
+        // If concession still exceeds Term 1 + Term 2, apply to Term 3
+        remainingConcession = Math.max(0, remainingConcession - feeStructure.term2Fee);
+        calculatedTerm3Fee = Math.max(0, feeStructure.term3Fee - remainingConcession);
+        
+        totalCalculatedFee = calculatedTerm1Fee + calculatedTerm2Fee + calculatedTerm3Fee;
+        
+        console.log('💰 Fee calculation:', {
+          original: totalOriginalFee,
+          concession: concessionAmount,
+          term1: calculatedTerm1Fee,
+          term2: calculatedTerm2Fee,
+          term3: calculatedTerm3Fee,
+          total: totalCalculatedFee,
+          remainingConcession: remainingConcession
+        });
+      } catch (feeError) {
+        if (feeError.statusCode) {
+          throw feeError;
+        }
+        console.error('❌ Error calculating fees:', feeError);
+        throw createError(500, 'Error validating fee structure for student registration');
+      }
+    }
+
+    // Handle guardian photo uploads (student photo comes from SDMS at display time)
+    let guardianPhoto1Url = null;
+    let guardianPhoto2Url = null;
+
+    if (req.files) {
+      try {
+        if (req.files.guardianPhoto1 && req.files.guardianPhoto1[0]) {
+          console.log('📸 Uploading guardian 1 photo to S3...');
+          guardianPhoto1Url = await uploadToS3(req.files.guardianPhoto1[0], 'guardian-photos');
+          console.log('✅ Guardian 1 photo uploaded successfully:', guardianPhoto1Url);
+        }
+        if (req.files.guardianPhoto2 && req.files.guardianPhoto2[0]) {
+          console.log('📸 Uploading guardian 2 photo to S3...');
+          guardianPhoto2Url = await uploadToS3(req.files.guardianPhoto2[0], 'guardian-photos');
+          console.log('✅ Guardian 2 photo uploaded successfully:', guardianPhoto2Url);
+        }
+      } catch (uploadError) {
+        console.error('❌ Error uploading photos to S3:', uploadError);
+        // Check if S3 credentials are configured
+        if (!process.env.AWS_ACCESS_KEY || !process.env.AWS_SECRET_KEY || !process.env.AWS_S3_BUCKET || !process.env.AWS_REGION) {
+          throw createError(500, 'S3 configuration is missing. Please configure AWS credentials and S3 bucket settings.');
+        }
+        throw createError(500, `Failed to upload photos to S3: ${uploadError.message}`);
+      }
+    }
+
+    // Handle guardian photo URLs from preregistration (if no file uploads)
+    if (!guardianPhoto1Url && req.body.guardianPhoto1Url) {
+      guardianPhoto1Url = req.body.guardianPhoto1Url;
+    }
+    if (!guardianPhoto2Url && req.body.guardianPhoto2Url) {
+      guardianPhoto2Url = req.body.guardianPhoto2Url;
+    }
+
+    // Handle email properly - only set if provided and not empty
+    const emailValue = email ? String(email).trim() : '';
+    const finalEmail = emailValue === '' ? undefined : emailValue;
+
+    // Track concession request if concession is set
+    const concessionAmount = Number(concession) || 0;
+    const concessionData = {
+      concession: concessionAmount,
+      concessionApproved: false,
+      concessionRequestedBy: null,
+      concessionRequestedAt: null
+    };
+    
+    const sqlCourseId = sqlAcademics?.sqlCourseId || null;
+    const sqlBranchId = sqlAcademics?.sqlBranchId || null;
+
+    // If concession is set, track who requested it
+    if (concessionAmount > 0 && req.admin) {
+      concessionData.concessionRequestedBy = req.admin._id;
+      concessionData.concessionRequestedAt = new Date();
+      concessionData.concessionHistory = [{
+        action: 'requested',
+        amount: concessionAmount,
+        previousAmount: null,
+        performedBy: req.admin._id,
+        performedAt: new Date(),
+        notes: ''
+      }];
+    }
+
+    if (isRenewal) {
+      const student = existingStudent;
+      const previousAcademicYear = student.academicYear;
+
+      await closeActiveOccupancyHistory({ studentId: student._id });
+
+      // Phase 6: close prior-year HostelRequest when registering for a new AY
+      if (previousAcademicYear && previousAcademicYear !== academicYear) {
+        try {
+          await closeActiveHostelRequestForUser(student, {
+            academicYear: previousAcademicYear,
+            status: 'expired',
+            statusReason: 'new_year_registration',
+            adminId: req.admin?._id
+          });
+        } catch (hrErr) {
+          console.warn('Prior-year HostelRequest close skipped:', hrErr.message);
+        }
+      }
+
+      if (previousAcademicYear && previousAcademicYear !== academicYear) {
+        const hasPreviousHistory = await RoomOccupancyHistory.exists({
+          student: student._id,
+          academicYear: previousAcademicYear
+        });
+        if (!hasPreviousHistory) {
+          await RoomOccupancyHistory.create({
+            student: student._id,
+            studentName: student.name,
+            rollNumber: student.rollNumber,
+            course: sqlAcademics?.course || student.course,
+            branch: sqlAcademics?.branch || student.branch,
+            yearOfStudy: sqlAcademics ? Math.max(1, sqlAcademics.year - 1) : (student.year || 1),
+            academicYear: previousAcademicYear,
+            hostel: student.hostel,
+            hostelCategory: student.hostelCategory,
+            room: student.room,
+            roomNumber: student.roomNumber,
+            bedNumber: student.bedNumber,
+            lockerNumber: student.lockerNumber,
+            allocatedFrom: student.createdAt || new Date(),
+            allocatedTo: new Date(),
+            status: 'Expired',
+            expiryReason: 'academic_year_end',
+            createdBy: req.admin?._id || null
+          });
+        }
+      }
+
+      student.name = name || student.name;
+      if (resolvedAdmissionNumber) {
+        student.admissionNumber = resolvedAdmissionNumber;
+      }
+      if (normalizedGender) student.gender = normalizedGender;
+      if (sqlCourseId) student.sqlCourseId = sqlCourseId;
+      if (sqlBranchId) student.sqlBranchId = sqlBranchId;
+      if (college) {
+        student.college = typeof college === 'string' ? JSON.parse(college) : college;
+      }
+      student.category = finalCategoryName;
+      if (mealType) student.mealType = mealType;
+      if (parentPermissionForOuting !== undefined) {
+        student.parentPermissionForOuting = Boolean(parentPermissionForOuting);
+      }
+      // Save yearly allocation onto User for quick reference and backwards compatibility
+      if (hostel) student.hostel = hostel;
+      if (hostelCategory) student.hostelCategory = hostelCategory;
+      if (roomDoc?._id) student.room = roomDoc._id;
+      if (roomNumber) student.roomNumber = roomNumber;
+      if (bedNumber) student.bedNumber = bedNumber;
+      if (lockerNumber) student.lockerNumber = lockerNumber;
+      student.admitDate = parsedAdmitDate;
+      student.joiningDate = parsedJoiningDate;
+      student.leftDate = parsedLeftDate;
+      if (studentPhone) student.studentPhone = studentPhone;
+      if (parentPhone) student.parentPhone = parentPhone;
+      if (motherName) student.motherName = motherName;
+      if (motherPhone) student.motherPhone = motherPhone;
+      if (localGuardianName) student.localGuardianName = localGuardianName;
+      if (localGuardianPhone) student.localGuardianPhone = localGuardianPhone;
+      student.batch = normalizeBatchToYear(sqlAcademics?.batch || batch || student.batch);
+      student.academicYear = academicYear;
+      student.applicationStatus = 'Active';
+      student.set('applicationExpiryDate', undefined);
+      student.set('applicationExpiryExtendedAt', undefined);
+      student.set('applicationExpiryExtendedBy', undefined);
+      if (finalEmail) student.email = finalEmail;
+      if (guardianPhoto1Url) student.guardianPhoto1 = guardianPhoto1Url;
+      if (guardianPhoto2Url) student.guardianPhoto2 = guardianPhoto2Url;
+      student.concession = concessionData.concession;
+      student.concessionApproved = concessionData.concessionApproved;
+      student.concessionRequestedBy = concessionData.concessionRequestedBy;
+      student.concessionRequestedAt = concessionData.concessionRequestedAt;
+      if (concessionData.concessionHistory) {
+        student.concessionHistory = concessionData.concessionHistory;
+      }
+      student.calculatedTerm1Fee = calculatedTerm1Fee;
+      student.calculatedTerm2Fee = calculatedTerm2Fee;
+      student.calculatedTerm3Fee = calculatedTerm3Fee;
+      student.totalCalculatedFee = totalCalculatedFee;
+
+      await repairMissingRollNumber(student, sqlAcademics);
+      await student.save({ validateModifiedOnly: true });
+
+      // Phase 3: occupancy audit emitted from HostelRequest dual-write (not a live snapshot)
+      let hostelRequest = null;
+      try {
+        hostelRequest = await dualWriteHostelRequest({
+          student,
+          academicYear,
+          hostel,
+          hostelCategory,
+          roomDoc,
+          roomNumber,
+          bedNumber,
+          lockerNumber,
+          mealType,
+          parentPermissionForOuting,
+          concession: concessionData.concession,
+          sqlAcademics,
+          adminId: req.admin?._id
+        });
+      } catch (hrErr) {
+        console.error('❌ HostelRequest dual-write failed on returning-student registration:', hrErr);
+        throw hrErr;
+      }
+
+      try {
+        await FeeReminder.updateMany(
+          { student: student._id, isActive: true },
+          { $set: { isActive: false } }
+        );
+        await FeeReminder.createForStudent(student._id, new Date(), academicYear);
+      } catch (feeError) {
+        console.error('❌ Error creating fee reminder on renewal:', student.rollNumber, feeError);
+      }
+
+      await syncStudentHostelFeeSafely(student, { academicYear });
+
+      const enrichedStudent = await enrichStudentAcademics(student);
+      console.log(
+        `♻️ Registered returning student ${student.rollNumber} for academic year ${academicYear} (new HostelRequest; password unchanged)`
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          student: enrichedStudent,
+          isRenewal: true,
+          hostelRequestId: hostelRequest?._id || null,
+          hostelSequenceId: hostelRequest?.hostelSequenceId || null
+        },
+        message: `Student registered for academic year ${academicYear}`
+      });
+    }
+
+    const genderForHostelId =
+      normalizedGender || (await inferGenderFromHostel(hostel)) || 'Male';
+    const hostelId = await generateHostelId(genderForHostelId);
+    console.log('Generated hostel ID:', hostelId);
+
+    // Create new student — login uses SDMS/SQL credentials (no local password generated)
+    const student = new User({
+      name,
+      rollNumber: rollUpper,
+      admissionNumber: resolvedAdmissionNumber,
+      role: 'student',
+      ...(normalizedGender && { gender: normalizedGender }),
+      ...(sqlCourseId && { sqlCourseId }),
+      ...(sqlBranchId && { sqlBranchId }),
+      college: typeof college === 'string' ? JSON.parse(college) : college,
+      category: finalCategoryName,
+      mealType,
+      parentPermissionForOuting: parentPermissionForOuting !== undefined ? parentPermissionForOuting : true,
+      studentPhone,
+      parentPhone,
+      motherName,
+      motherPhone,
+      localGuardianName,
+      localGuardianPhone,
+      batch: normalizeBatchToYear(sqlAcademics?.batch || batch),
+      academicYear,
+      applicationStatus: 'Active',
+      email: finalEmail,
+      hostel,
+      hostelCategory,
+      ...(roomDoc?._id && { room: roomDoc._id }),
+      ...(roomNumber && { roomNumber }),
+      ...(bedNumber && { bedNumber }),
+      ...(lockerNumber && { lockerNumber }),
+      hostelId,
+      isPasswordChanged: false,
+      admitDate: parsedAdmitDate,
+      joiningDate: parsedJoiningDate,
+      leftDate: parsedLeftDate,
+      guardianPhoto1: guardianPhoto1Url,
+      guardianPhoto2: guardianPhoto2Url,
+      ...concessionData,
+      calculatedTerm1Fee,
+      calculatedTerm2Fee,
+      calculatedTerm3Fee,
+      totalCalculatedFee
+    });
+
+    const savedStudent = await student.save();
+
+    // Phase 3: occupancy audit emitted from HostelRequest dual-write (not a live snapshot)
+    let hostelRequest = null;
+    try {
+      hostelRequest = await dualWriteHostelRequest({
+        student: savedStudent,
+        academicYear,
+        hostel,
+        hostelCategory,
+        roomDoc,
+        roomNumber,
+        bedNumber,
+        lockerNumber,
+        mealType,
+        parentPermissionForOuting,
+        concession: concessionData.concession,
+        sqlAcademics,
+        adminId: req.admin?._id
+      });
+    } catch (hrErr) {
+      console.error('❌ HostelRequest dual-write failed on new-student registration:', hrErr);
+      // Do not leave an active User that is invisible to the HostelRequest-backed
+      // Students page. A retry can safely create the identity again.
+      await User.deleteOne({ _id: savedStudent._id });
+      throw hrErr;
+    }
+
+    // Create fee reminder for the student
+    try {
+      const registrationDate = new Date();
+      await FeeReminder.createForStudent(
+        savedStudent._id,
+        registrationDate,
+        academicYear
+      );
+      console.log('✅ Fee reminder created for student:', savedStudent.rollNumber);
+    } catch (feeError) {
+      console.error('❌ Error creating fee reminder for student:', savedStudent.rollNumber, feeError);
+      // Don't fail the registration if fee reminder creation fails
+    }
+
+    await syncStudentHostelFeeSafely(savedStudent, { academicYear });
+
+    const enrichedStudent = await enrichStudentAcademics(savedStudent);
+
+    res.json({
+      success: true,
+      data: {
+        student: enrichedStudent,
+        isRenewal: false,
+        hostelRequestId: hostelRequest?._id || null,
+        hostelSequenceId: hostelRequest?.hostelSequenceId || null
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
+// Helper to get course duration based on course name
+function getCourseDuration(courseName) {
+  const courseNameUpper = courseName.toUpperCase();
+  if (courseNameUpper.includes('B.TECH') || courseNameUpper.includes('PHARMACY')) {
+    return 4;
+  } else if (courseNameUpper.includes('DIPLOMA') || courseNameUpper.includes('DEGREE')) {
+    return 3;
+  }
+  return 4; // Default to 4 years
+}
+
+// Helper to map short branch names to full names based on seeded data
+function getBranchNameMapping(courseName, branchName) {
+  // Normalize inputs for case-insensitive matching
+  const courseNameUpper = courseName.toUpperCase();
+  const branchNameUpper = branchName.toUpperCase();
+  
+  // B.Tech branches
+  if (courseNameUpper.includes('B.TECH') || courseNameUpper.includes('BTECH')) {
+    switch (branchNameUpper) {
+      case 'CSE': return 'Computer Science Engineering';
+      case 'ECE': return 'Electronics & Communication Engineering';
+      case 'EEE': return 'Electrical & Electronics Engineering';
+      case 'MECH': return 'Mechanical Engineering';
+      case 'CIVIL': return 'Civil Engineering';
+      case 'AI': return 'Artificial Intelligence';
+      case 'AI & ML': return 'Artificial Intelligence & Machine Learning';
+      case 'AI&ML': return 'Artificial Intelligence & Machine Learning';
+      default: return branchName; // Return original if no mapping found
+    }
+  }
+  
+  // Diploma branches
+  if (courseNameUpper.includes('DIPLOMA')) {
+    switch (branchNameUpper) {
+      case 'DCME': return 'Diploma in Computer Engineering';
+      case 'DECE': return 'Diploma in Electronics';
+      case 'DMECH': return 'Diploma in Mechanical Engineering';
+      case 'DFISHERIES': return 'Diploma in Fisheries';
+      case 'DAH': return 'Diploma in Animal Husbandry';
+      case 'DAIML': return 'Diploma in AI & ML';
+      case 'DAGRI': return 'Diploma in Agriculture';
+      default: return branchName; // Return original if no mapping found
+    }
+  }
+  
+  // Pharmacy branches
+  if (courseNameUpper.includes('PHARMACY')) {
+    switch (branchNameUpper) {
+      case 'B-PHARMACY': return 'B-Pharmacy';
+      case 'BPHARM': return 'B-Pharmacy';
+      case 'PHARM D': return 'Pharm D';
+      case 'PHARMD': return 'Pharm D';
+      case 'PHARM(PB) D': return 'Pharm(PB) D';
+      case 'PHARMPBD': return 'Pharm(PB) D';
+      case 'PHARMACEUTICAL ANALYSIS': return 'Pharmaceutical Analysis';
+      case 'PHARMANALYSIS': return 'Pharmaceutical Analysis';
+      case 'PHARMACEUTICS': return 'Pharmaceutics';
+      case 'PHARMA QUALITY ASSURANCE': return 'Pharma Quality Assurance';
+      case 'PHARMQA': return 'Pharma Quality Assurance';
+      default: return branchName; // Return original if no mapping found
+    }
+  }
+  
+  // Degree branches
+  if (courseNameUpper.includes('DEGREE')) {
+    switch (branchNameUpper) {
+      case 'AGRICULTURE': return 'Agriculture';
+      case 'HORTICULTURE': return 'Horticulture';
+      case 'FOOD TECHNOLOGY': return 'Food Technology';
+      case 'FOODTECH': return 'Food Technology';
+      case 'FISHERIES': return 'Fisheries';
+      case 'FOOD SCIENCE & NUTRITION': return 'Food Science & Nutrition';
+      case 'FOODSCIENCE': return 'Food Science & Nutrition';
+      default: return branchName; // Return original if no mapping found
+    }
+  }
+  
+  return branchName; // Return original if no mapping found
+}
+
+// Helper to normalize gender with case-insensitive handling
+function normalizeGender(gender) {
+  if (!gender) return null;
+  
+  const genderUpper = gender.toUpperCase();
+  
+  // Handle various gender formats
+  if (genderUpper === 'MALE' || genderUpper === 'M' || genderUpper === 'BOY') {
+    return 'Male';
+  }
+  if (genderUpper === 'FEMALE' || genderUpper === 'F' || genderUpper === 'GIRL') {
+    return 'Female';
+  }
+  
+  return null; // Invalid gender
+}
+
+// Helper to normalize category names. Categories are dynamic (HostelCategory),
+// so this only cleans up common legacy spellings and passes everything else through.
+function normalizeCategory(category) {
+  if (!category) return null;
+
+  const trimmed = String(category).trim();
+  if (!trimmed) return null;
+
+  const categoryUpper = trimmed.toUpperCase();
+  switch (categoryUpper) {
+    case 'A PLUS':
+    case 'A_PLUS':
+      return 'A+';
+    case 'B PLUS':
+    case 'B_PLUS':
+      return 'B+';
+    default:
+      return trimmed;
+  }
+}
+
+// Helper to normalize course names for database lookup
+function normalizeCourseName(courseName) {
+  if (!courseName) return courseName;
+  
+  const courseUpper = courseName.toUpperCase();
+  
+  // Map common variations to database names
+  if (courseUpper === 'BTECH' || courseUpper === 'B.TECH' || courseUpper === 'B TECH') {
+    return 'B.Tech';
+  }
+  if (courseUpper === 'DIPLOMA') {
+    return 'Diploma';
+  }
+  if (courseUpper === 'PHARMACY') {
+    return 'Pharmacy';
+  }
+  if (courseUpper === 'DEGREE') {
+    return 'Degree';
+  }
+  
+  return courseName; // Return original if no mapping found
+}
+
+// Helper to extract end year from batch or academic year
+function getEndYear(str) {
+  if (!str) return null;
+  const parts = str.split('-');
+  return parts.length === 2 ? parseInt(parts[1], 10) : null;
+}
+
+// Helper to calculate current year based on batch and current date
+// Now integrates with academic calendar if available
+async function calculateCurrentYear(batch, courseDuration = 4, courseId = null) {
+  if (!batch) return 1;
+  
+  // Extract start year from batch (e.g., "2022-2026" -> 2022)
+  const batchParts = batch.split('-');
+  const startYear = parseInt(batchParts[0], 10);
+  
+  if (isNaN(startYear)) return 1;
+  
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // January is 0
+  
+  // Try to use academic calendar if courseId is provided
+  if (courseId) {
+    try {
+      const AcademicCalendar = (await import('../models/AcademicCalendar.js')).default;
+      
+      // Find the current academic year based on current date
+      const currentAcademicYear = `${currentYear}-${currentYear + 1}`;
+      
+      // Look for academic calendar entries for this course and academic year
+      const academicCalendar = await AcademicCalendar.findOne({
+        course: courseId,
+        academicYear: currentAcademicYear,
+        isActive: true
+      }).sort({ yearOfStudy: 1, semester: 1 });
+      
+      if (academicCalendar) {
+        console.log(`📅 Found academic calendar for course ${courseId}, academic year ${currentAcademicYear}`);
+        
+        // Find the current semester based on current date
+        const currentSemester = await AcademicCalendar.findOne({
+          course: courseId,
+          academicYear: currentAcademicYear,
+          startDate: { $lte: currentDate },
+          endDate: { $gte: currentDate },
+          isActive: true
+        });
+        
+        if (currentSemester) {
+          console.log(`📅 Current semester found: Year ${currentSemester.yearOfStudy}, Semester ${currentSemester.semester}`);
+          return currentSemester.yearOfStudy;
+        } else {
+          // If no current semester found, find the most recent past semester
+          const pastSemester = await AcademicCalendar.findOne({
+            course: courseId,
+            academicYear: currentAcademicYear,
+            endDate: { $lt: currentDate },
+            isActive: true
+          }).sort({ yearOfStudy: -1, semester: -1 });
+          
+          if (pastSemester) {
+            console.log(`📅 Using most recent past semester: Year ${pastSemester.yearOfStudy}, Semester ${pastSemester.semester}`);
+            return pastSemester.yearOfStudy;
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️ Error accessing academic calendar, falling back to old logic:`, error.message);
+    }
+  }
+  
+  // Fallback to old logic if no academic calendar data
+  console.log(`📅 No academic calendar data found, using old logic for batch ${batch}`);
+  
+  // Calculate years since batch started
+  let yearsSinceStart = currentYear - startYear;
+  
+  // If we're in the first half of the year (before July), 
+  // students are still in the previous academic year
+  if (currentMonth < 7) {
+    yearsSinceStart = Math.max(0, yearsSinceStart - 1);
+  }
+  
+  // Calculate current year (1-based, so add 1)
+  const currentYearOfStudy = Math.min(yearsSinceStart + 1, courseDuration);
+  const finalYear = Math.max(1, currentYearOfStudy);
+  
+  console.log(`Year calculation for batch ${batch} (old logic):`, {
+    startYear,
+    currentYear,
+    currentMonth,
+    yearsSinceStart,
+    courseDuration,
+    currentYearOfStudy,
+    finalYear
+  });
+  
+  return finalYear;
+}
+
+// Validate academic year
+const validateAcademicYear = (year) => {
+  if (!/^\d{4}-\d{4}$/.test(year)) return false;
+  const [start, end] = year.split('-').map(Number);
+  return end === start + 1;
+};
+
+// Preview bulk student upload
+export const previewBulkUpload = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Bulk upload has been removed. Register students individually from SQL.'
+  });
+};
+
+export const bulkAddStudents = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Bulk upload has been removed. Register students individually from SQL.'
+  });
+};
+
+// Get all students with pagination and filters
+export const getStudents = async (req, res, next) => {
+  try {
+    let { page = 1, limit = 10, course, branch, gender, category, roomNumber, batch, academicYear, year, search, hostelStatus, hostel, skipFeesAndConcessions } = req.query;
+    const academicFilters = { course, branch, year: year ? parseInt(year, 10) : undefined };
+    const hasAcademicFilter = !!(course || branch || year);
+
+    // Wardens are always scoped to their assigned hostel (legacy: hostelType → gender)
+    const warden = req.warden || (req.admin?.role === 'warden' ? req.admin : null);
+    if (warden) {
+      const assignedHostelId = warden.assignedHostelId?._id || warden.assignedHostelId;
+      if (assignedHostelId) {
+        hostel = assignedHostelId.toString();
+        gender = undefined; // Prefer hostel occupancy over gender
+      } else if (warden.hostelType) {
+        gender = warden.hostelType.toLowerCase() === 'boys' ? 'Male'
+          : warden.hostelType.toLowerCase() === 'girls' ? 'Female'
+          : gender;
+      }
+    }
+
+    let students;
+    let count;
+
+    const isSkipFees = skipFeesAndConcessions === 'true';
+
+    if (academicYear) {
+      const result = await fetchStudentsForAcademicYear({
+        academicYear,
+        filters: { gender, category, roomNumber, batch, search, hostelStatus, hostel },
+        page,
+        limit,
+        academicFilters,
+        skipFeesAndConcessions: isSkipFees
+      });
+      students = result.students;
+      count = result.count;
+    } else {
+      const query = { role: 'student' };
+
+      if (gender) query.gender = gender;
+      if (category) query.category = category;
+      if (roomNumber) query.roomNumber = roomNumber;
+      if (batch) query.batch = batch;
+      if (hostel) query.hostel = hostel;
+
+      if (hostelStatus) {
+        const statusNorm = String(hostelStatus).toLowerCase();
+        if (statusNorm === 'active' || hostelStatus === 'Active') {
+          query.applicationStatus = { $in: ['Active', 'Extended'] };
+        } else if (statusNorm === 'expired' || hostelStatus === 'Inactive') {
+          query.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+        } else if (statusNorm === 'cancelled') {
+          query.applicationStatus = 'Withdrawn';
+        } else {
+          query.applicationStatus = hostelStatus;
+        }
+      }
+
+      if (search) {
+        const searchRegex = new RegExp(search, 'i');
+        query.$or = [
+          { name: searchRegex },
+          { rollNumber: searchRegex },
+          { admissionNumber: searchRegex }
+        ];
+      }
+
+      const populateOpts = [
+        { path: 'hostel', select: '_id name' },
+        { path: 'hostelCategory', select: '_id name' }
+      ];
+
+      if (hasAcademicFilter) {
+        const allDocs = await User.find(query)
+          .select('-password')
+          .populate(populateOpts)
+          .sort({ createdAt: -1 })
+          .lean();
+        let enriched = await enrichStudentsAcademics(allDocs, { skipFeesAndConcessions: isSkipFees });
+        enriched = enriched.filter(s => matchesAcademicFilters(s, academicFilters));
+        enriched = dedupeStudentsByIdentity(enriched);
+        count = enriched.length;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        students = enriched.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+      } else {
+        students = await User.find(query)
+          .select('-password')
+          .populate(populateOpts)
+          .sort({ createdAt: -1 })
+          .limit(limit * 1)
+          .skip((page - 1) * limit)
+          .lean();
+        students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: isSkipFees });
+        count = await User.countDocuments(query);
+      }
+    }
+
+    // When no AY filter, still expose stay dates from the active HostelRequest only (never User)
+    if (!academicYear && students?.length) {
+      const admissions = [
+        ...new Set(
+          students
+            .map((s) => normalizeAdmissionNumber(s.admissionNumber))
+            .filter(Boolean)
+        )
+      ];
+      if (admissions.length) {
+        const activeRequests = await HostelRequest.find({
+          admissionNumber: { $in: admissions },
+          status: 'active'
+        })
+          .populate('hostelId', '_id name')
+          .populate('hostelCategoryId', '_id name')
+          .lean();
+        const requestByAdmission = new Map();
+        for (const request of activeRequests) {
+          const key = normalizeAdmissionNumber(request.admissionNumber);
+          if (key) requestByAdmission.set(key, request);
+        }
+        students = students.map((student) => {
+          const request = requestByAdmission.get(
+            normalizeAdmissionNumber(student.admissionNumber)
+          );
+          return overlayStudentWithHostelRequest(
+            student,
+            request || null,
+            request?.academicYear || student.academicYear
+          );
+        });
+      } else {
+        students = students.map((student) =>
+          overlayStudentWithHostelRequest(student, null, student.academicYear)
+        );
+      }
+    }
+
+    students = await attachResolvedExpiryDates(students);
+
+    res.json({
+      success: true,
+      data: {
+        students,
+        totalPages: Math.ceil(count / limit),
+        currentPage: page,
+        totalStudents: count
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get student by ID
+export const getStudentById = async (req, res, next) => {
+  try {
+    const student = await User.findOne({ _id: req.params.id, role: 'student' })
+      .select('-password')
+      .populate('hostel', '_id name')
+      .populate('hostelCategory', '_id name')
+      .lean();
+    
+    if (!student) {
+      throw createError(404, 'Student not found');
+    }
+
+    const enriched = await enrichStudentAcademics(student);
+
+    res.json({
+      success: true,
+      data: enriched
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update student
+export const updateStudent = async (req, res, next) => {
+  try {
+  const { 
+      name, 
+      rollNumber,
+      admissionNumber,
+      course, 
+      year,
+      branch, 
+      gender,
+      category,
+      hostel,
+      hostelCategory,
+      room,
+      mealType,
+      parentPermissionForOuting,
+      roomNumber, 
+      bedNumber,
+      lockerNumber,
+      studentPhone, 
+      parentPhone,
+      batch,
+      academicYear,
+      hostelStatus,
+      email,
+      concession,
+      admitDate,
+      joiningDate,
+      leftDate
+    } = req.body;
+    
+    console.log('Update payload (adminController):', req.body); // Debug log
+    const student = await User.findOne({ _id: req.params.id, role: 'student' });
+    if (!student) {
+      throw createError(404, 'Student not found');
+    }
+
+    // Fast path: date + optional room assignment (warden home / attendance modals).
+    // Skip SQL enrichment, fee recalculation. `academicYear` scopes HostelRequest updates.
+    const hasFiles = Boolean(req.files && Object.keys(req.files).length);
+    const isQuickWardenUpdate =
+      !hasFiles &&
+      (admitDate || joiningDate || leftDate !== undefined || roomNumber) &&
+      !name &&
+      !rollNumber &&
+      !admissionNumber &&
+      !course &&
+      !year &&
+      !branch &&
+      !gender &&
+      !mealType &&
+      parentPermissionForOuting === undefined &&
+      !studentPhone &&
+      !parentPhone &&
+      !batch &&
+      !hostelStatus &&
+      !email &&
+      concession === undefined;
+
+    if (isQuickWardenUpdate) {
+      const targetYear = academicYear || student.academicYear;
+      let expiredRequest = null;
+      let allocatedRoom = null;
+      let stayDates = null;
+
+      // Canonical AY-wise stay dates on HostelRequest
+      if (admitDate || joiningDate || leftDate !== undefined) {
+        stayDates = await updateStayDatesForAdmission({
+          admissionNumber: student.admissionNumber,
+          academicYear: targetYear,
+          ...(admitDate ? { admitDate } : {}),
+          ...(joiningDate !== undefined ? { joiningDate: joiningDate || null } : {}),
+          ...(leftDate !== undefined ? { leftDate: leftDate || null } : {}),
+          adminId: req.admin?._id
+        });
+
+        if (!stayDates) {
+          throw createError(
+            404,
+            `No hostel request found for this student in academic year ${targetYear}`
+          );
+        }
+        // Stay dates live only on HostelRequest — do not mirror onto User
+      }
+
+      if (leftDate) {
+        // Schedule expiry for leftDate. Expire immediately only if date is today or earlier.
+        if (stayDates && isLeftDateDue(stayDates.leftDate || leftDate)) {
+          // updateStayDatesForAdmission already expires the HostelRequest when due;
+          // keep this for User/history side-effects on still-active docs.
+          expiredRequest =
+            (await expireHostelRequestByLeftDate(stayDates, {
+              adminId: req.admin?._id
+            })) || stayDates;
+
+          if (String(targetYear) === String(student.academicYear)) {
+            student.bedNumber = undefined;
+            student.lockerNumber = undefined;
+            student.roomNumber = undefined;
+            student.room = undefined;
+            student.applicationStatus = 'Expired';
+            student.hostelStatus = 'Inactive';
+          }
+        }
+      }
+
+      // Assign / change room for this academic year (when request is still active).
+      if (roomNumber && !expiredRequest) {
+        let targetHostelId = hostel || req.body.hostelId || student.hostel;
+        let targetCategoryId = hostelCategory || student.hostelCategory;
+
+        if (category && !targetCategoryId) {
+          const categoryDoc = await HostelCategory.findOne({
+            ...(targetHostelId ? { hostel: targetHostelId } : {}),
+            name: String(category).trim()
+          });
+          if (categoryDoc) {
+            targetCategoryId = categoryDoc._id;
+            if (!targetHostelId) targetHostelId = categoryDoc.hostel;
+          }
+        }
+
+        if (!targetHostelId && student.admissionNumber) {
+          const activeReq = await HostelRequest.findOne({
+            admissionNumber: String(student.admissionNumber).toUpperCase(),
+            academicYear: targetYear,
+            status: 'active'
+          }).lean();
+          if (activeReq) {
+            targetHostelId = activeReq.hostelId;
+            targetCategoryId = targetCategoryId || activeReq.hostelCategoryId;
+          }
+        }
+
+        const roomQuery = { roomNumber };
+        if (targetHostelId) roomQuery.hostel = targetHostelId;
+        if (targetCategoryId) roomQuery.category = targetCategoryId;
+
+        let roomDoc = await Room.findOne(roomQuery);
+        if (!roomDoc && targetHostelId) {
+          roomDoc = await Room.findOne({ roomNumber, hostel: targetHostelId });
+        }
+        if (!roomDoc) {
+          throw createError(400, 'Invalid room number for the selected hostel/category.');
+        }
+
+        let nextBed = bedNumber;
+        let nextLocker = lockerNumber;
+        if (!nextBed || !nextLocker) {
+          const { occupiedBeds, occupiedLockers } = await getOccupiedBedsAndLockersForAcademicYear(
+            roomDoc,
+            targetYear
+          );
+          const occupiedBedSet = new Set(occupiedBeds);
+          const occupiedLockerSet = new Set(occupiedLockers);
+          if (!nextBed) {
+            for (let i = 1; i <= (roomDoc.bedCount || 0); i++) {
+              const candidate = `${roomNumber} Bed ${i}`;
+              if (!occupiedBedSet.has(candidate)) {
+                nextBed = candidate;
+                break;
+              }
+            }
+          }
+          if (!nextLocker) {
+            for (let i = 1; i <= (roomDoc.bedCount || 0); i++) {
+              const candidate = `${roomNumber} Locker ${i}`;
+              if (!occupiedLockerSet.has(candidate)) {
+                nextLocker = candidate;
+                break;
+              }
+            }
+          }
+        }
+
+        await updateActiveRequestAllocationForAdmission({
+          admissionNumber: student.admissionNumber,
+          academicYear: targetYear,
+          hostelId: targetHostelId || roomDoc.hostel,
+          hostelCategoryId: targetCategoryId || roomDoc.category,
+          roomId: roomDoc._id,
+          roomNumber,
+          bedNumber: nextBed,
+          lockerNumber: nextLocker,
+          adminId: req.admin?._id,
+          userId: student._id
+        });
+
+        student.hostel = targetHostelId || roomDoc.hostel;
+        student.hostelCategory = targetCategoryId || roomDoc.category;
+        student.room = roomDoc._id;
+        student.roomNumber = roomNumber;
+        if (nextBed) student.bedNumber = nextBed;
+        if (nextLocker) student.lockerNumber = nextLocker;
+        allocatedRoom = roomNumber;
+      }
+
+      await student.save({ validateModifiedOnly: true });
+
+      return res.json({
+        success: true,
+        data: {
+          student: {
+            id: student._id,
+            admitDate: stayDates?.admitDate ?? null,
+            joiningDate: stayDates?.joiningDate ?? null,
+            leftDate: stayDates?.leftDate ?? null,
+            roomNumber: student.roomNumber,
+            bedNumber: student.bedNumber,
+            lockerNumber: student.lockerNumber,
+            category: student.category,
+            hostelCategory: student.hostelCategory,
+            academicYear: targetYear
+          },
+          hostelRequestExpired: Boolean(expiredRequest),
+          leftDateScheduled: Boolean(leftDate && !expiredRequest),
+          roomAllocated: allocatedRoom
+        }
+      });
+    }
+
+    const previousApplicationStatus = student.applicationStatus;
+    const academicSnapshot = await enrichStudentAcademics(student);
+
+    // Resolve hostel/category for room validation under new hierarchy
+    let targetHostelId = hostel || req.body.hostelId || student.hostel;
+
+    // If student.hostel is not set directly on User, fallback to active HostelRequest
+    if (!targetHostelId && (student.admissionNumber || student.rollNumber)) {
+      const activeReq = await HostelRequest.findOne({
+        $or: [
+          ...(student.admissionNumber ? [{ admissionNumber: student.admissionNumber.toUpperCase() }] : []),
+          ...(student.rollNumber ? [{ sdmsRollNumber: student.rollNumber.toUpperCase() }] : [])
+        ],
+        status: { $in: ['active', 'allocated', 'approved'] }
+      }).lean();
+      if (activeReq?.hostelId) {
+        targetHostelId = activeReq.hostelId;
+      }
+    }
+
+    let targetCategoryId = hostelCategory;
+    let targetCategoryName = category;
+
+    // If category name is provided in payload, resolve its ID to ensure consistency
+    if (category) {
+      let categoryDoc = null;
+      if (targetHostelId) {
+        categoryDoc = await HostelCategory.findOne({ hostel: targetHostelId, name: category.trim() });
+      }
+      if (!categoryDoc) {
+        categoryDoc = await HostelCategory.findOne({ name: category.trim() });
+      }
+      if (categoryDoc) {
+        targetCategoryId = categoryDoc._id;
+        targetCategoryName = categoryDoc.name;
+        if (!targetHostelId) {
+          targetHostelId = categoryDoc.hostel;
+        }
+      } else {
+        throw createError(400, `Category "${category}" not found.`);
+      }
+    } else if (hostelCategory) {
+      targetCategoryId = hostelCategory;
+    }
+
+    // Fallback to existing student values if not provided in request
+    if (!targetCategoryId) targetCategoryId = student.hostelCategory;
+    if (!targetCategoryName) targetCategoryName = student.category;
+    if (!targetHostelId) targetHostelId = student.hostel;
+
+    // Validate hostel exists if provided
+    if (targetHostelId) {
+      const hostelExists = await Hostel.exists({ _id: targetHostelId });
+      if (!hostelExists) {
+        throw createError(400, 'Invalid hostel.');
+      }
+    }
+
+    // Validate category exists within hostel if provided
+    if (targetCategoryId) {
+      const categoryExists = await HostelCategory.exists({ _id: targetCategoryId, hostel: targetHostelId });
+      if (!categoryExists) {
+        throw createError(400, 'Invalid category for the selected hostel.');
+      }
+    }
+
+    // Validate room number against Room model using hostel+category hierarchy
+    let roomDoc = null;
+    if (roomNumber) {
+      const roomQuery = { roomNumber };
+      if (targetHostelId) roomQuery.hostel = targetHostelId;
+      if (targetCategoryId) roomQuery.category = targetCategoryId;
+
+      roomDoc = await Room.findOne(roomQuery);
+      if (!roomDoc && targetHostelId) {
+        roomDoc = await Room.findOne({ roomNumber, hostel: targetHostelId });
+      }
+      if (!roomDoc) {
+        roomDoc = await Room.findOne({ roomNumber });
+      }
+      if (!roomDoc) {
+        throw createError(400, 'Invalid room number for the selected hostel/category.');
+      }
+    }
+
+    // Update student fields
+
+    // Validate academic year
+    if (academicYear && !validateAcademicYear(academicYear)) {
+      throw createError(400, 'Invalid Academic Year format. Must be YYYY-YYYY with a 1-year difference.');
+    }
+
+    // Validate phone numbers
+    if (studentPhone && studentPhone.trim() && !/^[0-9]{10}$/.test(studentPhone)) {
+      throw createError(400, 'Student phone number must be 10 digits.');
+    }
+    if (parentPhone && !/^[0-9]{10}$/.test(parentPhone)) {
+      throw createError(400, 'Parent phone number must be 10 digits.');
+    }
+
+    // Validate email if provided
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw createError(400, 'Invalid email address format.');
+    }
+
+    // Validate status if present (legacy hostelStatus or applicationStatus values)
+    if (
+      hostelStatus &&
+      !['Active', 'Inactive', 'Expired', 'Extended', 'Withdrawn', 'active', 'expired', 'cancelled'].includes(
+        hostelStatus
+      )
+    ) {
+      throw createError(400, 'Invalid status');
+    }
+
+    // Validate bed and locker assignment if provided
+    const targetAcademicYear = academicYear || student.academicYear;
+    let occupancyRoomDoc = roomDoc;
+    if (!occupancyRoomDoc && (bedNumber || lockerNumber)) {
+      occupancyRoomDoc = await Room.findById(student.room);
+    }
+
+    if (bedNumber && occupancyRoomDoc) {
+      const bedOccupied = await isBedOccupiedForAcademicYear(
+        occupancyRoomDoc,
+        bedNumber,
+        targetAcademicYear,
+        student._id
+      );
+      if (bedOccupied) {
+        throw createError(400, 'Selected bed is already occupied');
+      }
+
+      const roomToCheck = roomNumber || student.roomNumber;
+      const expectedBedFormat = `${roomToCheck} Bed `;
+      if (!bedNumber.startsWith(expectedBedFormat)) {
+        throw createError(400, 'Invalid bed number format for this room');
+      }
+    }
+
+    if (lockerNumber && occupancyRoomDoc) {
+      const lockerOccupied = await isLockerOccupiedForAcademicYear(
+        occupancyRoomDoc,
+        lockerNumber,
+        targetAcademicYear,
+        student._id
+      );
+      if (lockerOccupied) {
+        throw createError(400, 'Selected locker is already occupied');
+      }
+
+      const roomToCheck = roomNumber || student.roomNumber;
+      const expectedLockerFormat = `${roomToCheck} Locker `;
+      if (!lockerNumber.startsWith(expectedLockerFormat)) {
+        throw createError(400, 'Invalid locker number format for this room');
+      }
+    }
+
+    // Handle guardian photo uploads (student photo comes from SDMS)
+    if (req.files) {
+      if (req.files.guardianPhoto1 && req.files.guardianPhoto1[0]) {
+        // Delete old photo if exists
+        if (student.guardianPhoto1) {
+          try {
+            await deleteFromS3(student.guardianPhoto1);
+          } catch (error) {
+            console.error('Error deleting old guardian photo 1:', error);
+          }
+        }
+        // Upload new photo
+        student.guardianPhoto1 = await uploadToS3(req.files.guardianPhoto1[0], 'guardian-photos');
+      }
+      if (req.files.guardianPhoto2 && req.files.guardianPhoto2[0]) {
+        // Delete old photo if exists
+        if (student.guardianPhoto2) {
+          try {
+            await deleteFromS3(student.guardianPhoto2);
+          } catch (error) {
+            console.error('Error deleting old guardian photo 2:', error);
+          }
+        }
+        // Upload new photo
+        student.guardianPhoto2 = await uploadToS3(req.files.guardianPhoto2[0], 'guardian-photos');
+      }
+    }
+
+    // Update fields
+    if (name) student.name = name;
+    if (rollNumber?.trim()) student.rollNumber = rollNumber.trim().toUpperCase();
+    if (admissionNumber !== undefined) student.admissionNumber = admissionNumber ? admissionNumber.toUpperCase() : undefined;
+    // course, branch, year are managed in SQL — not updated in MongoDB
+    if (gender) student.gender = gender;
+    // Set category string from provided value or derived hostelCategory name
+    if (category || targetCategoryName) student.category = category || targetCategoryName;
+    if (mealType) student.mealType = mealType;
+    if (parentPermissionForOuting !== undefined) {
+      console.log('🔧 Updating parentPermissionForOuting:', parentPermissionForOuting, 'type:', typeof parentPermissionForOuting);
+      student.parentPermissionForOuting = Boolean(parentPermissionForOuting);
+      console.log('🔧 Updated student.parentPermissionForOuting to:', student.parentPermissionForOuting);
+    }
+    // Phase 6: allocation lives on HostelRequest — sync there, not onto User room/hostel fields
+    if (batch) student.batch = normalizeBatchToYear(batch);
+    // academicYear in this payload scopes which HostelRequest to update (outer filter / form year).
+    // Do NOT rewrite User.academicYear here — that is the student's current year and must stay intact.
+    const stayYear = academicYear || student.academicYear;
+    const isEditingCurrentYear = String(stayYear) === String(student.academicYear);
+
+    // hostelStatus is User-level — only apply when editing the student's CURRENT academic year.
+    // Historical AY edits must not deactivate/cancel the live year request.
+    if (hostelStatus && isEditingCurrentYear) {
+      const statusNorm = String(hostelStatus).toLowerCase();
+      if (statusNorm === 'inactive' || statusNorm === 'expired') {
+        student.applicationStatus = 'Expired';
+      } else if (statusNorm === 'active') {
+        student.applicationStatus = 'Active';
+      } else if (statusNorm === 'cancelled' || statusNorm === 'withdrawn') {
+        student.applicationStatus = 'Withdrawn';
+      } else if (['Active', 'Expired', 'Extended', 'Withdrawn'].includes(hostelStatus)) {
+        student.applicationStatus = hostelStatus;
+      }
+    }
+    if (email) student.email = email;
+
+    // AY-wise stay dates → HostelRequest only (never User)
+    if (admitDate || joiningDate || leftDate !== undefined) {
+      const stayDates = await updateStayDatesForAdmission({
+        admissionNumber: student.admissionNumber,
+        academicYear: stayYear,
+        ...(admitDate ? { admitDate } : {}),
+        ...(joiningDate !== undefined ? { joiningDate: joiningDate || null } : {}),
+        ...(leftDate !== undefined ? { leftDate: leftDate || null } : {}),
+        adminId: req.admin?._id
+      });
+
+      if (!stayDates) {
+        throw createError(
+          404,
+          `No hostel request found for this student in academic year ${stayYear}`
+        );
+      }
+
+      if (leftDate) {
+        // Schedule expiry; apply immediately only if leftDate is today or earlier.
+        if (stayDates && isLeftDateDue(stayDates.leftDate || leftDate)) {
+          // HostelRequest is expired inside updateStayDatesForAdmission when due.
+          await expireHostelRequestByLeftDate(stayDates, { adminId: req.admin?._id });
+          if (isEditingCurrentYear) {
+            student.bedNumber = undefined;
+            student.lockerNumber = undefined;
+            student.roomNumber = undefined;
+            student.room = undefined;
+            student.applicationStatus = 'Expired';
+            student.hostelStatus = 'Inactive';
+          }
+        }
+      }
+    }
+
+    // Only sync HostelRequest when allocation-related fields are actually sent in this request.
+    // Do NOT treat existing student.hostel/category fallbacks as "touched".
+    const allocationTouched =
+      Boolean(roomNumber) ||
+      Boolean(hostel || req.body.hostelId) ||
+      Boolean(hostelCategory || category) ||
+      bedNumber !== undefined ||
+      lockerNumber !== undefined ||
+      Boolean(mealType) ||
+      parentPermissionForOuting !== undefined ||
+      concession !== undefined;
+
+    if (allocationTouched && student.admissionNumber) {
+      try {
+        await updateActiveRequestAllocationForAdmission({
+          admissionNumber: student.admissionNumber,
+          academicYear: academicYear || student.academicYear,
+          hostelId: targetHostelId,
+          hostelCategoryId: targetCategoryId,
+          roomId: roomDoc?._id,
+          roomNumber,
+          bedNumber,
+          lockerNumber,
+          mealType,
+          parentPermissionForOuting,
+          concession,
+          adminId: req.admin?._id,
+          userId: student._id
+        });
+
+        // Denormalized cache on User for legacy readers (principal attendance, edit response).
+        // HostelRequest remains the source of truth for allocation.
+        if (targetHostelId) student.hostel = targetHostelId;
+        if (targetCategoryId) student.hostelCategory = targetCategoryId;
+        if (roomDoc?._id) student.room = roomDoc._id;
+        if (roomNumber !== undefined && roomNumber !== null && roomNumber !== '') {
+          student.roomNumber = roomNumber;
+        }
+        if (bedNumber !== undefined) {
+          student.bedNumber = bedNumber || undefined;
+        }
+        if (lockerNumber !== undefined) {
+          student.lockerNumber = lockerNumber || undefined;
+        }
+      } catch (hrErr) {
+        console.error('Failed to sync HostelRequest allocation on student update:', hrErr.message);
+        throw hrErr;
+      }
+    }
+
+    // Handle concession update - if concession is changed, reset approval status and track who requested
+    if (concession !== undefined) {
+      const newConcessionAmount = Number(concession) || 0;
+      const oldConcessionAmount = student.concession || 0;
+      
+      // If concession amount changed, reset approval status
+      if (newConcessionAmount !== oldConcessionAmount) {
+        student.concession = newConcessionAmount;
+        
+        if (newConcessionAmount > 0) {
+          // New concession set - requires approval
+          student.concessionApproved = false;
+          student.concessionApprovedBy = null;
+          student.concessionApprovedAt = null;
+          if (req.admin) {
+            student.concessionRequestedBy = req.admin._id;
+            student.concessionRequestedAt = new Date();
+            
+            // Add to history
+            if (!student.concessionHistory) {
+              student.concessionHistory = [];
+            }
+            student.concessionHistory.push({
+              action: 'requested',
+              amount: newConcessionAmount,
+              previousAmount: oldConcessionAmount,
+              performedBy: req.admin._id,
+              performedAt: new Date(),
+              notes: ''
+            });
+          }
+          
+          // Recalculate fees with new concession
+          try {
+            const FeeStructure = (await import('../models/FeeStructure.js')).default;
+            const feeStructure = await FeeStructure.getFeeStructure(
+              student.academicYear,
+              academicSnapshot.course,
+              academicSnapshot.branch,
+              academicSnapshot.year,
+              student.category
+            );
+            if (feeStructure) {
+              const concessionAmount = newConcessionAmount;
+              student.calculatedTerm1Fee = Math.max(0, feeStructure.term1Fee - concessionAmount);
+              let remainingConcession = Math.max(0, concessionAmount - feeStructure.term1Fee);
+              student.calculatedTerm2Fee = Math.max(0, feeStructure.term2Fee - remainingConcession);
+              remainingConcession = Math.max(0, remainingConcession - feeStructure.term2Fee);
+              student.calculatedTerm3Fee = Math.max(0, feeStructure.term3Fee - remainingConcession);
+              student.totalCalculatedFee = student.calculatedTerm1Fee + student.calculatedTerm2Fee + student.calculatedTerm3Fee;
+            }
+          } catch (error) {
+            console.error('Error recalculating fees:', error);
+          }
+        } else {
+          // Concession removed - reset all concession-related fields
+          student.concession = 0;
+          student.concessionApproved = false;
+          student.concessionApprovedBy = null;
+          student.concessionApprovedAt = null;
+          student.concessionRequestedBy = null;
+          student.concessionRequestedAt = null;
+          
+          // Reset calculated fees to original
+          try {
+            const FeeStructure = (await import('../models/FeeStructure.js')).default;
+            const feeStructure = await FeeStructure.getFeeStructure(
+              student.academicYear,
+              academicSnapshot.course,
+              academicSnapshot.branch,
+              academicSnapshot.year,
+              student.category
+            );
+            if (feeStructure) {
+              student.calculatedTerm1Fee = feeStructure.term1Fee;
+              student.calculatedTerm2Fee = feeStructure.term2Fee;
+              student.calculatedTerm3Fee = feeStructure.term3Fee;
+              student.totalCalculatedFee = feeStructure.totalFee;
+            }
+          } catch (error) {
+            console.error('Error recalculating fees:', error);
+          }
+        }
+      }
+    }
+
+    // Graduation status auto-update on manual edit (year/course from SQL)
+    let maxYear = 3;
+    try {
+      const courseName = academicSnapshot.course;
+      maxYear = getCourseDuration(String(courseName));
+    } catch (error) {
+      console.error('Error fetching course for graduation status:', error);
+      const courseKey = Object.keys(COURSES).find(key => COURSES[key] === academicSnapshot.course);
+      maxYear = (courseKey === 'BTECH' || courseKey === 'PHARMACY') ? 4 : 3;
+    }
+
+    const batchEndYear = getBatchEndYear(student.batch, maxYear);
+    const academicEndYear = getEndYear(student.academicYear);
+    const effectiveYear = academicSnapshot.year || student.year;
+    if (
+      effectiveYear >= maxYear &&
+      batchEndYear &&
+      academicEndYear &&
+      batchEndYear === academicEndYear
+    ) {
+      student.graduationStatus = 'Graduated';
+    } else {
+      student.graduationStatus = 'Enrolled';
+    }
+
+    if (
+      isEditingCurrentYear &&
+      student.applicationStatus === 'Expired' &&
+      ['Active', 'Extended'].includes(previousApplicationStatus)
+    ) {
+      student.bedNumber = undefined;
+      student.lockerNumber = undefined;
+      await closeActiveOccupancyHistory({
+        studentId: student._id,
+        academicYear: student.academicYear,
+        status: 'Withdrawn',
+        expiryReason: 'admin_inactive'
+      });
+      try {
+        await closeActiveHostelRequestForUser(student, {
+          academicYear: student.academicYear,
+          status: 'cancelled',
+          statusReason: 'admin_inactive',
+          adminId: req.admin?._id
+        });
+      } catch (hrErr) {
+        console.error('Failed to close HostelRequest on admin inactive:', hrErr.message);
+      }
+    }
+
+    await repairMissingRollNumber(student, academicSnapshot);
+    await student.save({ validateModifiedOnly: true });
+
+    // Phase 6: occupancy history is updated via HostelRequest allocation sync (above)
+
+    await syncStudentHostelFeeSafely(student);
+
+    const enrichedStudent = await enrichStudentAcademics(student.toObject());
+
+    res.json({
+      success: true,
+      data: {
+        student: {
+          id: student._id,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          gender: student.gender,
+          course: enrichedStudent.course ?? academicSnapshot.course,
+          year: enrichedStudent.year ?? academicSnapshot.year,
+          branch: enrichedStudent.branch ?? academicSnapshot.branch,
+          category: student.category,
+          mealType: student.mealType,
+          parentPermissionForOuting: student.parentPermissionForOuting,
+          roomNumber: student.roomNumber,
+          bedNumber: student.bedNumber,
+          lockerNumber: student.lockerNumber,
+          studentPhone: enrichedStudent.studentPhone,
+          parentPhone: enrichedStudent.parentPhone,
+          email: student.email,
+          batch: student.batch,
+          academicYear: student.academicYear,
+          hostelStatus: student.hostelStatus,
+          studentPhoto: student.studentPhoto,
+          guardianPhoto1: student.guardianPhoto1,
+          guardianPhoto2: student.guardianPhoto2
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Cancel student registration (retains student data & attendance history in database)
+export const deleteStudent = async (req, res, next) => {
+  try {
+    const student = await User.findOne({ _id: req.params.id, role: 'student' });
+
+    if (!student) {
+      throw createError(404, 'Student not found');
+    }
+
+    const academicYear = req.query.academicYear || student.academicYear;
+
+    // Update application status to Withdrawn (Cancelled) and free bed/locker
+    student.applicationStatus = 'Withdrawn';
+    student.bedNumber = undefined;
+    student.lockerNumber = undefined;
+    await student.save({ validateModifiedOnly: true });
+
+    // Cancel active HostelRequest records for this student
+    if (student.admissionNumber || student.rollNumber) {
+      const orConditions = [];
+      if (student.admissionNumber) {
+        orConditions.push({ admissionNumber: student.admissionNumber.toUpperCase() });
+      }
+      if (student.rollNumber) {
+        orConditions.push({ sdmsRollNumber: student.rollNumber.toUpperCase() });
+      }
+
+      if (orConditions.length > 0) {
+        const query = { $or: orConditions };
+        if (academicYear) query.academicYear = academicYear;
+        await HostelRequest.updateMany(query, {
+          $set: {
+            status: 'cancelled',
+            cancelledAt: new Date(),
+            statusReason: 'admin_cancelled'
+          }
+        });
+      }
+    }
+
+    await closeActiveOccupancyHistory({
+      studentId: student._id,
+      academicYear: academicYear || student.academicYear,
+      status: 'Withdrawn',
+      expiryReason: 'admin_cancelled'
+    });
+
+    res.json({
+      success: true,
+      message: `Registration for ${student.name} cancelled successfully. Student data remains preserved for attendance and history.`,
+      data: {
+        cancelled: true,
+        studentId: student._id
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get all branches (optionally filter by course)
+export const getAllBranches = async (req, res, next) => {
+  try {
+    const { course } = req.query;
+    const query = course ? { course } : {};
+    const branches = await Branch.find(query).populate('course');
+    res.json({ success: true, data: branches });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// (Optional) Get branches by courseId as a param (if you want to keep this route)
+export const getBranchesByCourse = async (req, res, next) => {
+  try {
+    const { courseId } = req.params;
+    if (!courseId) {
+      return res.status(400).json({ success: false, message: 'Course ID is required' });
+    }
+    const branches = await Branch.find({ course: courseId }).populate('course');
+    res.json({ success: true, data: branches });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get temporary students summary for admin dashboard
+export const getTempStudentsSummary = async (req, res) => {
+  return res.json({ success: true, data: { count: 0, students: [] }, message: 'Temp students feature removed' });
+};
+
+// Get total student count for admin dashboard
+export const getStudentsCount = async (req, res, next) => {
+  try {
+    const { course, branch, gender, academicYear, hostelStatus } = req.query;
+    
+    if (academicYear) {
+      const result = await fetchStudentsForAcademicYear({
+        academicYear,
+        filters: { gender, hostelStatus },
+        page: 1,
+        limit: 1000000,
+        academicFilters: { course, branch },
+        skipEnrichment: true,
+        skipFeesAndConcessions: true
+      });
+      
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      const newThisWeek = result.students.filter(s => new Date(s.createdAt) >= oneWeekAgo).length;
+      
+      return res.status(200).json({
+        success: true,
+        data: {
+          total: result.count,
+          count: result.count,
+          newThisWeek
+        }
+      });
+    }
+    
+    const query = { 
+      role: 'student'
+    };
+    if (hostelStatus) {
+      const statusNorm = String(hostelStatus).toLowerCase();
+      if (statusNorm === 'active') {
+        query.applicationStatus = { $in: ['Active', 'Extended'] };
+      } else if (statusNorm === 'inactive' || statusNorm === 'expired') {
+        query.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+      } else {
+        query.applicationStatus = hostelStatus;
+      }
+    } else {
+      query.applicationStatus = { $in: ['Active', 'Extended'] };
+    }
+
+    if (course) query.course = course;
+    if (branch) query.branch = branch;
+    if (gender) query.gender = gender;
+
+    const totalStudents = await User.countDocuments(query);
+    
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    
+    const newStudentsQuery = {
+      role: 'student',
+      createdAt: { $gte: oneWeekAgo }
+    };
+    if (hostelStatus) {
+      const statusNorm = String(hostelStatus).toLowerCase();
+      if (statusNorm === 'active') {
+        newStudentsQuery.applicationStatus = { $in: ['Active', 'Extended'] };
+      } else if (statusNorm === 'inactive' || statusNorm === 'expired') {
+        newStudentsQuery.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+      } else {
+        newStudentsQuery.applicationStatus = hostelStatus;
+      }
+    } else {
+      newStudentsQuery.applicationStatus = { $in: ['Active', 'Extended'] };
+    }
+    if (gender) newStudentsQuery.gender = gender;
+    
+    const newThisWeek = await User.countDocuments(newStudentsQuery);
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        total: totalStudents,
+        count: totalStudents,
+        newThisWeek
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching total student count:', error);
+    next(createError(500, 'Failed to fetch total student count.'));
+  }
+};
+
+
+// Get course counts for admin dashboard (resolves sql_* and course name strings)
+export const getCourseCounts = async (req, res, next) => {
+  try {
+    const { course, branch, category, roomNumber, academicYear, hostelStatus, hostel } = req.query;
+
+    let enriched = [];
+
+    if (academicYear) {
+      const result = await fetchStudentsForAcademicYear({
+        academicYear,
+        filters: { category, roomNumber, hostelStatus, hostel },
+        page: 1,
+        limit: 100000,
+        academicFilters: { course, branch },
+        skipEnrichment: true,
+        skipFeesAndConcessions: true
+      });
+      enriched = result.students;
+    } else {
+      const query = { role: 'student' };
+
+      if (course) query.course = course;
+      if (branch) query.branch = branch;
+      if (category) query.category = category;
+      if (roomNumber) query.roomNumber = roomNumber;
+      if (hostelStatus) {
+        const statusNorm = String(hostelStatus).toLowerCase();
+        if (statusNorm === 'active') {
+          query.applicationStatus = { $in: ['Active', 'Extended'] };
+        } else if (statusNorm === 'inactive' || statusNorm === 'expired') {
+          query.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+        } else {
+          query.applicationStatus = hostelStatus;
+        }
+      }
+      if (hostel) query.hostel = hostel;
+
+      enriched = await User.find(query).select('course').lean();
+    }
+
+    const countsObject = {};
+
+    for (const student of enriched) {
+      const courseName = (typeof student.course === 'string' ? student.course : student.course?.name) || 'Unknown';
+      countsObject[courseName] = (countsObject[courseName] || 0) + 1;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: countsObject,
+    });
+  } catch (error) {
+    console.error('Error fetching course counts:', error);
+    next(createError(500, 'Failed to fetch course counts.'));
+  }
+};
+
+const dashboardSummaryCache = new Map();
+const DASHBOARD_CACHE_TTL = 15 * 1000;
+
+// Lightweight consolidated endpoint for Admin Dashboard Summary
+export const getDashboardSummary = async (req, res, next) => {
+  try {
+    const { academicYear } = req.query;
+    const cacheKey = academicYear ? `ay_${academicYear}` : 'live';
+    const cached = dashboardSummaryCache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.ts < DASHBOARD_CACHE_TTL)) {
+      return res.status(200).json(cached.response);
+    }
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    let activeStudentsCount = 0;
+    let inactiveStudentsCount = 0;
+    let totalStudentsCount = 0;
+    let newThisWeekCount = 0;
+    let byCourse = [];
+
+    if (academicYear) {
+      const [activeAyResult, allAyResult] = await Promise.all([
+        fetchStudentsForAcademicYear({
+          academicYear,
+          filters: { hostelStatus: 'active' },
+          page: 1,
+          limit: 100000,
+          skipEnrichment: true,
+          skipFeesAndConcessions: true
+        }),
+        fetchStudentsForAcademicYear({
+          academicYear,
+          page: 1,
+          limit: 100000,
+          skipEnrichment: true,
+          skipFeesAndConcessions: true
+        })
+      ]);
+
+      const activeList = activeAyResult.students || [];
+      const allList = allAyResult.students || [];
+
+      activeStudentsCount = activeAyResult.count || activeList.length;
+      totalStudentsCount = allAyResult.count || allList.length;
+      inactiveStudentsCount = Math.max(0, totalStudentsCount - activeStudentsCount);
+      newThisWeekCount = allList.filter(s => new Date(s.createdAt) >= oneWeekAgo).length;
+
+      const countsMap = {};
+      allList.forEach(s => {
+        const cName = (typeof s.course === 'string' ? s.course : s.course?.name) || 'Unassigned';
+        countsMap[cName] = (countsMap[cName] || 0) + 1;
+      });
+
+      byCourse = Object.entries(countsMap)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+    } else {
+      const activeFilter = { role: 'student', applicationStatus: { $in: ['Active', 'Extended'] }, applicationStatus: { $nin: ['Expired', 'Withdrawn'] } };
+      const [activeCount, totalCount, newCount, studentsByCourseRaw] = await Promise.all([
+        User.countDocuments(activeFilter),
+        User.countDocuments({ role: 'student' }),
+        User.countDocuments({ ...activeFilter, createdAt: { $gte: oneWeekAgo } }),
+        User.aggregate([
+          { $match: activeFilter },
+          { $group: { _id: '$course', count: { $sum: 1 } } }
+        ])
+      ]);
+
+      activeStudentsCount = activeCount;
+      totalStudentsCount = totalCount;
+      inactiveStudentsCount = Math.max(0, totalCount - activeCount);
+      newThisWeekCount = newCount;
+      byCourse = studentsByCourseRaw
+        .map(item => ({
+          name: item._id || 'Unassigned',
+          count: item.count
+        }))
+        .sort((a, b) => b.count - a.count);
+    }
+
+    const [
+      complaintStats,
+      leaveStats,
+      roomStatsRaw,
+      requestOccupied,
+      ayActiveOccupied
+    ] = await Promise.all([
+      Complaint.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      Leave.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Room.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRooms: { $sum: 1 },
+            totalCapacity: { $sum: '$bedCount' }
+          }
+        }
+      ]),
+      // Live: all-AY active requests. AY Wise: all statuses for that year (display filled).
+      academicYear
+        ? countAllHostelRequestsForYear(academicYear)
+        : countAllLiveActiveHostelRequests(),
+      academicYear ? countActiveHostelRequestsForYear(academicYear) : Promise.resolve(null)
+    ]);
+
+    const complaintsMap = (complaintStats || []).reduce((acc, curr) => {
+      acc[curr._id] = curr.count;
+      return acc;
+    }, {});
+    const totalComplaints = Object.values(complaintsMap).reduce((a, b) => a + b, 0);
+
+    const leavesMap = (leaveStats || []).reduce((acc, curr) => {
+      acc[curr._id] = curr.count;
+      return acc;
+    }, {});
+
+    const rStats = roomStatsRaw[0] || { totalRooms: 0, totalCapacity: 0 };
+    const occupiedBeds = requestOccupied || 0;
+    // Available beds use active occupancy only (true vacancy).
+    const vacancyOccupied = academicYear ? (ayActiveOccupied || 0) : occupiedBeds;
+    const roomOccupancyRate =
+      rStats.totalCapacity > 0
+        ? Math.round((vacancyOccupied / rStats.totalCapacity) * 100)
+        : 0;
+
+    const responsePayload = {
+      success: true,
+      data: {
+        students: {
+          total: totalStudentsCount,
+          active: activeStudentsCount,
+          inactive: inactiveStudentsCount,
+          newThisWeek: newThisWeekCount,
+          byCourse
+        },
+        complaints: {
+          total: totalComplaints,
+          active: (complaintsMap['Pending'] || 0) + (complaintsMap['In Progress'] || 0),
+          resolved: complaintsMap['Resolved'] || 0,
+          inProgress: complaintsMap['In Progress'] || 0
+        },
+        leaves: {
+          pending: leavesMap['Pending'] || 0,
+          approved: leavesMap['Approved'] || 0,
+          rejected: leavesMap['Rejected'] || 0
+        },
+        rooms: {
+          total: rStats.totalRooms,
+          occupied: occupiedBeds,
+          available: Math.max(0, rStats.totalCapacity - vacancyOccupied),
+          occupancyRate: roomOccupancyRate
+        }
+      }
+    };
+
+    dashboardSummaryCache.set(cacheKey, { ts: Date.now(), response: responsePayload });
+    res.status(200).json(responsePayload);
+  } catch (error) {
+    console.error('Error fetching dashboard summary:', error);
+    next(createError(500, 'Failed to fetch dashboard summary.'));
+  }
+};
+
+
+// Add electricity bill for a room (legacy admin route — writes ElectricityBill collection)
+export const addElectricityBill = async (req, res, next) => {
+  try {
+    const { roomId } = req.params;
+    const { month, startUnits, endUnits, rate } = req.body;
+
+    if (!month || startUnits === undefined || endUnits === undefined) {
+      throw createError(400, 'Month, startUnits, and endUnits are required');
+    }
+
+    if (endUnits < startUnits) {
+      throw createError(400, 'End units cannot be less than start units');
+    }
+
+    let billRate = Room.defaultElectricityRate;
+    if (rate !== undefined && rate !== null && rate !== '') {
+      const parsedRate = Number(rate);
+      if (!isNaN(parsedRate)) {
+        billRate = parsedRate;
+        if (parsedRate !== Room.defaultElectricityRate) {
+          Room.setDefaultElectricityRate(parsedRate);
+        }
+      }
+    }
+
+    const consumption = endUnits - startUnits;
+    const total = consumption * billRate;
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      throw createError(404, 'Room not found');
+    }
+
+    const existingBill = await ElectricityBill.findOne({ room: roomId, month });
+    if (existingBill) {
+      throw createError(400, 'Bill for this month already exists');
+    }
+
+    const studentsInRoom = await User.find({
+      roomNumber: room.roomNumber,
+      role: 'student',
+      applicationStatus: { $in: ['Active', 'Extended'] }
+    });
+
+    if (studentsInRoom.length === 0) {
+      throw createError(400, 'No active students found in this room');
+    }
+
+    const billMonth = new Date(month + '-01');
+    const billMonthEnd = new Date(billMonth.getFullYear(), billMonth.getMonth() + 1, 0);
+    billMonthEnd.setHours(23, 59, 59, 999);
+
+    const studentIds = studentsInRoom.map((s) => s._id);
+    const approvedNOCs = await NOC.find({
+      student: { $in: studentIds },
+      status: 'Approved',
+      'calculatedElectricityBill.total': { $exists: true, $ne: null }
+    }).populate('student', 'name rollNumber');
+
+    let totalNOCAmount = 0;
+    const nocStudents = new Set();
+
+    for (const noc of approvedNOCs) {
+      if (noc.calculatedElectricityBill) {
+        const nocBillStart = new Date(noc.calculatedElectricityBill.billPeriodStart);
+        const nocBillEnd = new Date(noc.calculatedElectricityBill.billPeriodEnd);
+
+        if (billMonth <= nocBillEnd && billMonthEnd >= nocBillStart) {
+          const nocAmount =
+            noc.calculatedElectricityBill.studentShare ||
+            noc.calculatedElectricityBill.total ||
+            0;
+          totalNOCAmount += nocAmount;
+          nocStudents.add(noc.student._id.toString());
+        }
+      }
+    }
+
+    const remainingBillAmount = Math.max(0, total - totalNOCAmount);
+    const studentsWithoutNOC = studentsInRoom.filter(
+      (student) => !nocStudents.has(student._id.toString())
+    );
+
+    const buildStudentBills = (amountForNonNoc) =>
+      studentsInRoom.map((student) => {
+        const hasNOC = nocStudents.has(student._id.toString());
+        let nocAdjustment = 0;
+        if (hasNOC) {
+          const studentNOC = approvedNOCs.find(
+            (noc) =>
+              noc.student._id.toString() === student._id.toString() &&
+              billMonth <= new Date(noc.calculatedElectricityBill.billPeriodEnd) &&
+              billMonthEnd >= new Date(noc.calculatedElectricityBill.billPeriodStart)
+          );
+          if (studentNOC?.calculatedElectricityBill) {
+            nocAdjustment =
+              studentNOC.calculatedElectricityBill.studentShare ||
+              studentNOC.calculatedElectricityBill.total ||
+              0;
+          }
+        }
+        return {
+          studentId: student._id,
+          studentName: student.name,
+          studentRollNumber: student.rollNumber,
+          amount: hasNOC ? 0 : amountForNonNoc,
+          paymentStatus: 'unpaid',
+          nocAdjustment: hasNOC ? nocAdjustment : 0
+        };
+      });
+
+    const individualAmount =
+      studentsWithoutNOC.length > 0
+        ? Math.round(remainingBillAmount / studentsWithoutNOC.length)
+        : 0;
+    const studentBills = buildStudentBills(individualAmount);
+
+    const bill = await ElectricityBill.create({
+      room: room._id,
+      hostel: room.hostel,
+      category: room.category,
+      roomNumber: room.roomNumber,
+      meterType: room.meterType || 'single',
+      month,
+      startUnits,
+      endUnits,
+      consumption,
+      rate: billRate,
+      total,
+      totalNOCAdjustment: totalNOCAmount,
+      remainingAmount: remainingBillAmount,
+      studentBills
+    });
+
+    res.json({
+      success: true,
+      data: bill,
+      message:
+        studentsWithoutNOC.length === 0
+          ? `All students have NOC adjustments. Total NOC amount: ₹${totalNOCAmount}`
+          : undefined
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get electricity bills for a room
+export const getElectricityBills = async (req, res, next) => {
+  try {
+    const { roomId } = req.params;
+
+    const room = await Room.findById(roomId).select('_id');
+    if (!room) {
+      throw createError(404, 'Room not found');
+    }
+
+    const sortedBills = await ElectricityBill.find({ room: roomId }).sort({ month: -1 });
+
+    res.json({
+      success: true,
+      data: sortedBills
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Batch Renewal — disabled (use academic-year registration + automatic expiry)
+export const renewBatches = async (req, res, next) => {
+  try {
+    return res.status(410).json({
+      success: false,
+      message: 'Batch renewal has been removed. Register students for each new academic year via Register from SQL. Applications expire automatically at the configured expiry date.',
+      code: 'RENEWAL_DISABLED'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Clear all temporary students
+export const clearTempStudents = async (req, res) => {
+  return res.json({ success: true, message: 'Temp students feature removed', data: { deletedCount: 0 } });
+};
+
+// Search student by Roll Number for Security
+export const searchStudentByRollNumber = async (req, res, next) => {
+  try {
+    const { rollNumber } = req.params;
+    if (!rollNumber) {
+      return next(createError(400, 'Roll number is required.'));
+    }
+
+    // Note: course and branch are now stored as strings, not ObjectId references
+    const student = await User.findOne({ rollNumber: new RegExp(`^${rollNumber}$`, 'i'), role: 'student' })
+      .select('-password');
+      // Removed populate for course and branch - they are now strings
+
+    if (!student) {
+      return next(createError(404, 'Student with this roll number not found.'));
+    }
+
+    // Fetch security settings
+    let settings = await SecuritySettings.findOne();
+    if (!settings) {
+      settings = await SecuritySettings.create({});
+    }
+
+    // Prepare student data based on settings
+    let studentObj = await enrichStudentAcademics(student);
+    if (!settings.viewProfilePictures) {
+      studentObj.studentPhoto = undefined;
+    }
+    if (!settings.viewPhoneNumbers) {
+      studentObj.studentPhone = undefined;
+      studentObj.parentPhone = undefined;
+    }
+    if (!settings.viewGuardianImages) {
+      studentObj.guardianPhoto1 = undefined;
+      studentObj.guardianPhoto2 = undefined;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: studentObj
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Admin password reset for students
+export const resetStudentPassword = async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+    const studentId = req.params.id;
+
+    // Validate password length
+    if (!newPassword || newPassword.length < 6) {
+      throw createError(400, 'Password must be at least 6 characters long');
+    }
+
+    // Find student
+    const student = await User.findOne({ _id: studentId, role: 'student' });
+    if (!student) {
+      throw createError(404, 'Student not found');
+    }
+
+    // Update password
+    student.password = newPassword;
+    student.isPasswordChanged = true;
+
+    await repairMissingRollNumber(student);
+    await student.save({ validateModifiedOnly: true });
+
+    // Send email notification to student
+    let emailSent = false;
+    let emailError = null;
+    
+    if (student.email) {
+      try {
+        const loginUrl = `${req.protocol}://${req.get('host')}/login`;
+        await sendPasswordResetEmail(
+          student.email,
+          student.name,
+          student.rollNumber,
+          newPassword,
+          loginUrl
+        );
+        emailSent = true;
+        console.log('📧 Password reset email sent successfully to:', student.email);
+      } catch (emailErr) {
+        emailError = emailErr.message;
+        console.error('📧 Failed to send password reset email to:', student.email, emailErr);
+        // Don't fail the password reset if email fails
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Student password reset successfully',
+      data: {
+        student: {
+          id: student._id,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          isPasswordChanged: true
+        },
+        emailSent,
+        emailError
+      }
+    });
+  } catch (error) {
+    console.error('Admin password reset error:', error);
+    next(error);
+  }
+};
+
+// Get students by principal's assigned course
+// Helper function to resolve SQL course ID to course name
+const resolveCourseName = async (courseValue) => {
+  if (!courseValue) return null;
+  
+  // If it's already a course name (not a SQL ID), return it
+  if (typeof courseValue === 'string' && !courseValue.startsWith('sql_') && !/^\d+$/.test(courseValue)) {
+    return courseValue;
+  }
+  
+  // If it's a SQL ID format (sql_1, sql_2, etc.)
+  if (typeof courseValue === 'string' && courseValue.startsWith('sql_')) {
+    try {
+      const { fetchCourseByIdFromSQL } = await import('../utils/sqlService.js');
+      const sqlId = parseInt(courseValue.replace('sql_', ''));
+      const result = await fetchCourseByIdFromSQL(sqlId);
+      if (result.success && result.data) {
+        return result.data.name || courseValue;
+      }
+    } catch (error) {
+      console.error('Error resolving SQL course ID:', error);
+    }
+  }
+  
+  // If it's numeric, treat as SQL ID
+  if (/^\d+$/.test(courseValue.toString())) {
+    try {
+      const { fetchCourseByIdFromSQL } = await import('../utils/sqlService.js');
+      const result = await fetchCourseByIdFromSQL(parseInt(courseValue));
+      if (result.success && result.data) {
+        return result.data.name || courseValue;
+      }
+    } catch (error) {
+      console.error('Error resolving SQL course ID:', error);
+    }
+  }
+  
+  return courseValue;
+};
+
+export const getStudentsByPrincipalCourse = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, search, gender, category, roomNumber, batch, academicYear, hostelStatus, course } = req.query;
+    const principal = req.principal; // From principalAuth middleware
+
+    // Determine allowed courses for the principal
+    let allowedCourses = [];
+    
+    // New Logic: Filter by Assigned Colleges & Levels
+    if (principal.assignedCollegeIds && principal.assignedCollegeIds.length > 0) {
+      try {
+        const { fetchCoursesFromSQL } = await import('../utils/sqlService.js');
+        const sqlCoursesResult = await fetchCoursesFromSQL();
+        
+        if (sqlCoursesResult.success) {
+           const allCourses = sqlCoursesResult.data;
+           
+           // Filter courses that match College IDs AND Levels
+           const matchingCourses = allCourses.filter(course => {
+             const collegeMatch = course.college_id && principal.assignedCollegeIds.includes(course.college_id);
+             const levelMatch = (!principal.assignedLevels || principal.assignedLevels.length === 0) || 
+                               (course.level && principal.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
+             return collegeMatch && levelMatch;
+           });
+           
+           allowedCourses = matchingCourses.map(c => normalizeCourseName(c.name));
+        }
+      } catch (err) {
+        console.error('🎓 Error fetching SQL courses for principal filter:', err);
+      }
+    }
+    
+    // Fallback/Legacy Logic
+    if (allowedCourses.length === 0) {
+      if (principal.assignedCourses && principal.assignedCourses.length > 0) {
+        allowedCourses = principal.assignedCourses.map(c => normalizeCourseName(c.trim()));
+      } else if (principal.course) {
+        allowedCourses = [normalizeCourseName(principal.course.trim())];
+      }
+    }
+
+    if (allowedCourses.length === 0) {
+      throw createError(400, 'Principal has no assigned courses');
+    }
+
+    // Determine target course(s) for filtering
+    let targetCourses = allowedCourses;
+    if (course) {
+      const requestedCourse = normalizeCourseName(course.trim());
+      if (!allowedCourses.includes(requestedCourse)) {
+        throw createError(403, 'Access to this course is not authorized');
+      }
+      targetCourses = [requestedCourse];
+    }
+    
+    // Build base query - fetch all students that might match (including SQL IDs)
+    // We'll filter by course in memory after resolving SQL IDs
+    const baseQuery = {
+      role: 'student'
+    };
+    
+    // Add other filters first
+    if (gender) baseQuery.gender = gender;
+    if (category) baseQuery.category = category;
+    if (roomNumber) baseQuery.roomNumber = roomNumber;
+    if (batch) baseQuery.batch = batch;
+    if (academicYear) baseQuery.academicYear = academicYear;
+    if (hostelStatus) {
+      const statusNorm = String(hostelStatus).toLowerCase();
+      if (statusNorm === 'active') {
+        baseQuery.applicationStatus = { $in: ['Active', 'Extended'] };
+      } else if (statusNorm === 'inactive' || statusNorm === 'expired') {
+        baseQuery.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+      } else {
+        baseQuery.applicationStatus = hostelStatus;
+      }
+    }
+
+    // Add search filter if provided
+    if (search) {
+      baseQuery.$or = baseQuery.$or || [];
+      baseQuery.$or.push(
+        { name: { $regex: search, $options: 'i' } },
+        { rollNumber: { $regex: search, $options: 'i' } },
+        { hostelId: { $regex: search, $options: 'i' } }
+      );
+    }
+
+    const allStudents = await User.find(baseQuery)
+      .sort({ createdAt: -1 })
+      .select('-password')
+      .lean();
+
+    let enrichedStudents = await enrichStudentsAcademics(allStudents);
+
+    const filteredStudents = enrichedStudents.filter((student) => {
+      const normalizedStudentCourse = student.course
+        ? normalizeCourseName(student.course.trim())
+        : null;
+      if (!targetCourses.includes(normalizedStudentCourse)) return false;
+
+      if (principal.assignedCourses && principal.assignedCourses.length > 1) {
+        return true;
+      }
+      if (principal.branch) {
+        const principalBranch = principal.branch.trim();
+        const studentBranch = (student.branch || '').trim();
+        return studentBranch.toLowerCase() === principalBranch.toLowerCase();
+      }
+      return true;
+    });
+
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const totalStudents = filteredStudents.length;
+    const totalPages = Math.ceil(totalStudents / parseInt(limit, 10));
+    const transformedStudents = filteredStudents.slice(skip, skip + parseInt(limit, 10));
+
+    res.json({
+      success: true,
+      data: {
+        students: transformedStudents,
+        totalStudents,
+        totalPages,
+        currentPage: parseInt(page),
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('🎓 Error fetching students by principal course:', error);
+    next(error);
+  }
+}; 
+
+// Update student years based on academic calendar (if available) or batch
+export const updateStudentYearsFromAcademicCalendar = async (req, res, next) => {
+  try {
+    console.log('📅 Starting student year update based on academic calendar...');
+    
+    // Get all active students
+    const students = await User.find({ 
+      role: 'student',
+      applicationStatus: { $in: ['Active', 'Extended'] }
+    }).populate('course', 'name duration');
+    
+    console.log(`📊 Processing ${students.length} active students...`);
+    
+    let updatedCount = 0;
+    let errors = [];
+    let skippedCount = 0;
+    let academicCalendarUsed = 0;
+    let fallbackUsed = 0;
+
+    for (const student of students) {
+      try {
+        console.log(`🔍 Processing student: ${student.rollNumber}, current year: ${student.year}, batch: ${student.batch}`);
+        
+        if (student.batch && student.course) {
+          // Get course duration
+          const courseDuration = student.course.duration || 4;
+          
+          // Calculate correct year using academic calendar integration
+          const correctYear = await calculateCurrentYear(student.batch, courseDuration, student.course._id);
+          
+          console.log(`🧮 Calculated year for ${student.rollNumber}: ${correctYear} (current: ${student.year})`);
+          
+          // Update if year is different
+          if (student.year !== correctYear) {
+            const updateResult = await User.findByIdAndUpdate(
+              student._id, 
+              { year: correctYear },
+              { new: true }
+            );
+            
+            if (updateResult) {
+              updatedCount++;
+              console.log(`✅ Updated student ${student.rollNumber}: year ${student.year} → ${correctYear} (batch: ${student.batch})`);
+            } else {
+              console.log(`❌ Failed to update student ${student.rollNumber}`);
+              errors.push(`Failed to update student ${student.rollNumber}: Database update failed`);
+            }
+          } else {
+            console.log(`⏭️ Skipped student ${student.rollNumber}: year already correct (${student.year})`);
+            skippedCount++;
+          }
+        } else {
+          console.log(`⚠️ Skipped student ${student.rollNumber}: no batch or course information`);
+          skippedCount++;
+        }
+      } catch (error) {
+        console.error(`❌ Error updating student ${student.rollNumber}:`, error);
+        errors.push(`Error updating student ${student.rollNumber}: ${error.message}`);
+      }
+    }
+
+    console.log(`📊 Academic calendar update process completed:`);
+    console.log(`✅ Updated: ${updatedCount} students`);
+    console.log(`⏭️ Skipped: ${skippedCount} students`);
+    console.log(`❌ Errors: ${errors.length} errors`);
+
+    res.json({ 
+      success: true, 
+      message: `Updated ${updatedCount} students' years based on academic calendar and batch information.`,
+      data: { 
+        updatedCount, 
+        skippedCount,
+        totalStudents: students.length,
+        errors 
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in updateStudentYearsFromAcademicCalendar:', error);
+    next(error);
+  }
+};
+
+// Update existing students' years based on their batch (legacy method)
+export const updateStudentYears = async (req, res, next) => {
+  try {
+    console.log('🔄 Starting student year update process...');
+    
+    // First, let's check if we can find any students at all
+    const totalStudents = await User.countDocuments({ role: 'student' });
+    console.log(`📊 Total students found: ${totalStudents}`);
+    
+    // Check students with isActive field
+    const activeStudents = await User.countDocuments({ role: 'student', isActive: true });
+    console.log(`📊 Active students found: ${activeStudents}`);
+    
+    // Check students without isActive field (might be undefined)
+    const studentsWithoutActive = await User.countDocuments({ 
+      role: 'student', 
+      $or: [{ isActive: { $exists: false } }, { isActive: null }]
+    });
+    console.log(`📊 Students without isActive field: ${studentsWithoutActive}`);
+    
+    // Get all students regardless of isActive status
+    const students = await User.find({ role: 'student' });
+    console.log(`📊 Processing ${students.length} students...`);
+    
+    let updatedCount = 0;
+    let errors = [];
+    let skippedCount = 0;
+
+    for (const student of students) {
+      try {
+        console.log(`🔍 Processing student: ${student.rollNumber}, current year: ${student.year}, batch: ${student.batch}`);
+        
+        if (student.batch) {
+          // Get course duration
+          const CourseModel = (await import('../models/Course.js')).default;
+          const courseDoc = await CourseModel.findById(student.course);
+          const courseDuration = courseDoc ? courseDoc.duration : 4;
+          
+          console.log(`📚 Course duration for ${student.rollNumber}: ${courseDuration}`);
+          
+          // Calculate correct year
+          const correctYear = await calculateCurrentYear(student.batch, courseDuration, student.course);
+          
+          console.log(`🧮 Calculated year for ${student.rollNumber}: ${correctYear} (current: ${student.year})`);
+          
+          // Update if year is different
+          if (student.year !== correctYear) {
+            const updateResult = await User.findByIdAndUpdate(
+              student._id, 
+              { year: correctYear },
+              { new: true }
+            );
+            
+            if (updateResult) {
+              updatedCount++;
+              console.log(`✅ Updated student ${student.rollNumber}: year ${student.year} → ${correctYear} (batch: ${student.batch})`);
+            } else {
+              console.log(`❌ Failed to update student ${student.rollNumber}`);
+              errors.push(`Failed to update student ${student.rollNumber}: Database update failed`);
+            }
+          } else {
+            console.log(`⏭️ Skipped student ${student.rollNumber}: year already correct (${student.year})`);
+            skippedCount++;
+          }
+        } else {
+          console.log(`⚠️ Skipped student ${student.rollNumber}: no batch information`);
+          skippedCount++;
+        }
+      } catch (error) {
+        console.error(`❌ Error updating student ${student.rollNumber}:`, error);
+        errors.push(`Error updating student ${student.rollNumber}: ${error.message}`);
+      }
+    }
+
+    console.log(`📊 Update process completed:`);
+    console.log(`✅ Updated: ${updatedCount} students`);
+    console.log(`⏭️ Skipped: ${skippedCount} students`);
+    console.log(`❌ Errors: ${errors.length} errors`);
+
+    res.json({ 
+      success: true, 
+      message: `Updated ${updatedCount} students' years based on their batch and current date.`,
+      data: { 
+        updatedCount, 
+        skippedCount,
+        totalStudents: students.length,
+        errors 
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in updateStudentYears:', error);
+    next(error);
+  }
+}; 
+
+// Get students for admit card generation
+export const getStudentsForAdmitCards = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, search = '', course = '', year = '', category = '' } = req.query;
+    
+    const query = { role: 'student' };
+    
+    // Add search filter
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { rollNumber: { $regex: search, $options: 'i' } },
+        { hostelId: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Add filters
+    if (course) {
+      // Handle course filtering - course can be either ObjectId or string
+      if (course.match(/^[0-9a-fA-F]{24}$/)) {
+        // If it's a valid ObjectId, use it directly
+        query.course = course;
+      } else {
+        // If it's a string (course name), we need to find the course first
+        try {
+          const Course = (await import('../models/Course.js')).default;
+          const courseDoc = await Course.findOne({ name: { $regex: course, $options: 'i' } });
+          if (courseDoc) {
+            query.course = courseDoc._id;
+          } else {
+            // If course not found, return empty result
+            return res.json({
+              success: true,
+              data: {
+                students: [],
+                pagination: {
+                  current: parseInt(page),
+                  total: 0,
+                  totalStudents: 0
+                }
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error finding course:', error);
+          // Fallback to string matching if course lookup fails
+          query.course = { $regex: course, $options: 'i' };
+        }
+      }
+    }
+    if (year) query.year = year;
+    if (category) query.category = category;
+    
+    const skip = (page - 1) * limit;
+    
+    console.log('Admit cards query:', JSON.stringify(query, null, 2));
+    
+    const students = await User.find(query)
+      .populate('course', 'name')
+      .populate('branch', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select('name rollNumber admissionNumber course year branch gender category roomNumber studentPhone parentPhone email batch academicYear hostelId hostelStatus studentPhoto address concession concessionApproved calculatedTerm1Fee calculatedTerm2Fee calculatedTerm3Fee totalCalculatedFee');
+
+    const enrichedStudents = await enrichStudentsAcademics(students.map((s) => s.toObject()));
+
+    // Fallback: resolve missing roomNumbers from active HostelRequests
+    const missingRoomAdmissions = enrichedStudents
+      .filter(s => !s.roomNumber && (s.admissionNumber || s.rollNumber))
+      .map(s => s.admissionNumber || s.rollNumber);
+
+    if (missingRoomAdmissions.length > 0) {
+      const activeRequests = await HostelRequest.find({
+        $or: [
+          { admissionNumber: { $in: missingRoomAdmissions } },
+          { sdmsRollNumber: { $in: missingRoomAdmissions } }
+        ],
+        status: 'active'
+      }).select('admissionNumber sdmsRollNumber roomNumber').lean();
+
+      const requestMap = new Map();
+      activeRequests.forEach(r => {
+        if (r.admissionNumber) requestMap.set(r.admissionNumber.toUpperCase(), r.roomNumber);
+        if (r.sdmsRollNumber) requestMap.set(r.sdmsRollNumber.toUpperCase(), r.roomNumber);
+      });
+
+      enrichedStudents.forEach(student => {
+        if (!student.roomNumber) {
+          const admKey = student.admissionNumber ? student.admissionNumber.toUpperCase() : null;
+          const rollKey = student.rollNumber ? student.rollNumber.toUpperCase() : null;
+          student.roomNumber = (admKey && requestMap.get(admKey)) || (rollKey && requestMap.get(rollKey)) || student.roomNumber;
+        }
+      });
+    }
+
+    const transformedStudents = enrichedStudents.map((student) => ({
+      ...student,
+      courseId: student.course?._id || student.courseId,
+      course: student.course?.name || student.course
+    }));
+    
+    const total = await User.countDocuments(query);
+    
+    console.log('Admit cards results:', students.length, 'students found');
+    
+    res.json({
+      success: true,
+      data: {
+        students: transformedStudents,
+        pagination: {
+          current: parseInt(page),
+          total: Math.ceil(total / limit),
+          totalStudents: total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in getStudentsForAdmitCards:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch students for admit cards',
+      error: error.message
+    });
+  }
+};
+
+// Generate individual admit card
+export const generateAdmitCard = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const student = await User.findById(id)
+      .populate('course', 'name')
+      .populate('branch', 'name');
+    
+    if (!student || student.role !== 'student') {
+      throw createError(404, 'Student not found');
+    }
+
+    const studentWithAllocation = await applyActiveHostelRequestOverlay(
+      student.toObject(),
+      student.academicYear
+    );
+    const enriched = await enrichStudentAcademics(studentWithAllocation);
+
+    if (!enriched.studentPhoto) {
+      throw createError(400, 'Student photo is required for admit card generation. No photo found in SDMS for this student.');
+    }
+
+    // Check if concession is pending approval
+    if (student.concession > 0 && !student.concessionApproved) {
+      throw createError(400, 'Cannot generate admit card. Concession is pending approval. Please approve the concession first.');
+    }
+
+    const photoBase64 = await photoToBase64ForExport(enriched.studentPhoto, fetchImageAsBase64);
+    if (!photoBase64) {
+      throw createError(400, 'Failed to load student photo from SDMS');
+    }
+
+    let finalRoomNumber = studentWithAllocation.roomNumber || student.roomNumber;
+    if (!finalRoomNumber && (student.admissionNumber || student.rollNumber)) {
+      const activeReq = await HostelRequest.findOne({
+        $or: [
+          ...(student.admissionNumber ? [{ admissionNumber: student.admissionNumber }] : []),
+          ...(student.rollNumber ? [{ sdmsRollNumber: student.rollNumber }] : [])
+        ],
+        status: 'active'
+      }).select('roomNumber').lean();
+      if (activeReq?.roomNumber) {
+        finalRoomNumber = activeReq.roomNumber;
+      }
+    }
+
+    const categoryName = resolveCategoryNameForPrint(studentWithAllocation);
+
+    res.json({
+      success: true,
+      data: {
+        student: {
+          id: student._id,
+          name: enriched.name || student.name,
+          rollNumber: enriched.rollNumber || student.rollNumber,
+          course: enriched.course?.name || enriched.course || student.course?.name || student.course,
+          courseId: student.course?._id || student.course,
+          year: enriched.year ?? student.year,
+          branch: enriched.branch?.name || enriched.branch || student.branch?.name || student.branch,
+          gender: student.gender,
+          category: categoryName,
+          roomNumber: finalRoomNumber,
+          studentPhone: enriched.studentPhone || student.studentPhone,
+          parentPhone: enriched.parentPhone || student.parentPhone,
+          email: student.email,
+          batch: enriched.batch || student.batch,
+          academicYear: student.academicYear,
+          hostelId: studentWithAllocation.hostelSequenceId || student.hostelId,
+          hostelStatus: student.hostelStatus,
+          studentPhoto: photoBase64,
+          address: student.address,
+          concession: student.concession || 0,
+          calculatedTerm1Fee: student.calculatedTerm1Fee || 0,
+          calculatedTerm2Fee: student.calculatedTerm2Fee || 0,
+          calculatedTerm3Fee: student.calculatedTerm3Fee || 0,
+          totalCalculatedFee: student.totalCalculatedFee || 0
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Generate bulk admit cards
+export const generateBulkAdmitCards = async (req, res, next) => {
+  try {
+    const { studentIds } = req.body;
+    
+    if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
+      throw createError(400, 'Student IDs array is required');
+    }
+    
+    const students = await User.find({ 
+      _id: { $in: studentIds }, 
+      role: 'student' 
+    })
+    .populate('course', 'name')
+    .populate('branch', 'name')
+      .select('name rollNumber admissionNumber course year branch gender category roomNumber studentPhone parentPhone email batch academicYear hostelId hostelStatus studentPhoto address concession concessionApproved');
+
+    const enrichedStudents = await enrichStudentsAcademics(students.map((s) => s.toObject()));
+
+    const studentsWithoutPhotos = enrichedStudents.filter((s) => !s.studentPhoto);
+    if (studentsWithoutPhotos.length > 0) {
+      const names = studentsWithoutPhotos.map(s => s.name).join(', ');
+      throw createError(400, `Students without photos in SDMS: ${names}. All students must have photos for admit card generation.`);
+    }
+
+    const studentsWithPendingConcession = enrichedStudents.filter(
+      (s) => (s.concession > 0 && !s.concessionApproved)
+    );
+    if (studentsWithPendingConcession.length > 0) {
+      const names = studentsWithPendingConcession.map(s => s.name).join(', ');
+      throw createError(400, `Cannot generate admit cards for students with pending concession approvals: ${names}. Please approve their concessions first.`);
+    }
+
+    const studentsWithPhotos = [];
+    for (const student of enrichedStudents) {
+      try {
+        const photoBase64 = await photoToBase64ForExport(student.studentPhoto, fetchImageAsBase64);
+        if (!photoBase64) {
+          throw createError(400, `Failed to load photo for student: ${student.name}`);
+        }
+
+        studentsWithPhotos.push({
+          id: student._id,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          course: student.course?.name || student.course,
+          year: student.year,
+          branch: student.branch?.name || student.branch,
+          gender: student.gender,
+          category: student.category,
+          roomNumber: student.roomNumber,
+          studentPhone: student.studentPhone,
+          parentPhone: student.parentPhone,
+          email: student.email,
+          batch: student.batch,
+          academicYear: student.academicYear,
+          hostelId: student.hostelId,
+          hostelStatus: student.hostelStatus,
+          studentPhoto: photoBase64,
+          address: student.address
+        });
+      } catch (error) {
+        console.error(`Error fetching photo for student ${student.name}:`, error);
+        throw createError(400, `Failed to fetch photo for student: ${student.name}`);
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        students: studentsWithPhotos
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get available beds and lockers for a room
+export const getRoomBedLockerAvailability = async (req, res, next) => {
+  try {
+    const { roomNumber } = req.params;
+    const { academicYear, hostel, category } = req.query;
+    
+    if (!roomNumber) {
+      throw createError(400, 'Room number is required');
+    }
+
+    const roomQuery = { roomNumber };
+    if (hostel) roomQuery.hostel = hostel;
+    if (category) roomQuery.category = category;
+
+    const room = await Room.findOne(roomQuery);
+    if (!room) {
+      throw createError(404, 'Room not found');
+    }
+
+    const { occupiedBeds: studentBeds, occupiedLockers: studentLockers } =
+      await getOccupiedBedsAndLockersForAcademicYear(room, academicYear);
+
+    const occupiedBedsList = [...studentBeds];
+    const occupiedLockersList = [...studentLockers];
+
+    const StaffGuest = (await import('../models/StaffGuest.js')).default;
+    const staffInRoom = await StaffGuest.find({
+      type: 'staff',
+      roomNumber: room.roomNumber,
+      isActive: true
+    }).select('bedNumber');
+
+    staffInRoom.forEach((staff) => {
+      if (staff.bedNumber && !occupiedBedsList.includes(staff.bedNumber)) {
+        occupiedBedsList.push(staff.bedNumber);
+      }
+    });
+
+    const occupiedBedSet = new Set(occupiedBedsList);
+    const occupiedLockerSet = new Set(occupiedLockersList);
+
+    const allBeds = [];
+    const allLockers = [];
+    
+    for (let i = 1; i <= room.bedCount; i++) {
+      const bedNumber = `${roomNumber} Bed ${i}`;
+      const lockerNumber = `${roomNumber} Locker ${i}`;
+      
+      allBeds.push({
+        value: bedNumber,
+        label: bedNumber,
+        occupied: occupiedBedSet.has(bedNumber)
+      });
+      
+      allLockers.push({
+        value: lockerNumber,
+        label: lockerNumber,
+        occupied: occupiedLockerSet.has(lockerNumber)
+      });
+    }
+
+    const availableBeds = allBeds.filter(bed => !bed.occupied);
+    const availableLockers = allLockers.filter(locker => !locker.occupied);
+
+    res.json({
+      success: true,
+      data: {
+        room: {
+          roomNumber: room.roomNumber,
+          bedCount: room.bedCount,
+          gender: room.gender,
+          category: room.category
+        },
+        allBeds,
+        allLockers,
+        availableBeds,
+        availableLockers,
+        occupiedBeds: [...occupiedBedSet],
+        occupiedLockers: [...occupiedLockerSet],
+        currentOccupancy: occupiedBedSet.size,
+        academicYear: academicYear || null
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Generated passwords / TempStudent removed — students use SDMS credentials
+export const getStudentTempPassword = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Generated passwords removed. Students use student database credentials.'
+  });
+};
+
+// Share student credentials via SMS
+export const shareStudentCredentials = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Credential sharing removed. Students log in with student database credentials.'
+  });
+};
+
+// Get students with pending concession approvals
+// Get approved concessions (students with concession > 0 and concessionApprovedBy set)
+export const getApprovedConcessions = async (req, res, next) => {
+  try {
+    // Build query for students with concession > 0 and approved (concessionApprovedBy exists)
+    const query = {
+      role: 'student',
+      concession: { $gt: 0 },
+      concessionApprovedBy: { $exists: true, $ne: null }
+    };
+    
+    // Get all students with approved concessions
+    // Note: After SQL migration, course and branch are stored as strings, not ObjectId references
+    let students;
+    try {
+      students = await User.find(query)
+        .populate('concessionApprovedBy', 'username name')
+        .populate('concessionRequestedBy', 'username name')
+        .populate('concessionHistory.performedBy', 'username name')
+        .sort({ concessionApprovedAt: -1, createdAt: -1 })
+        .select('name rollNumber course year branch gender category roomNumber studentPhone parentPhone email batch academicYear hostelId hostelStatus address concession concessionApproved concessionApprovedBy concessionApprovedAt concessionRequestedBy concessionRequestedAt concessionHistory calculatedTerm1Fee calculatedTerm2Fee calculatedTerm3Fee totalCalculatedFee')
+        .lean();
+    } catch (dbError) {
+      console.error('Database error fetching approved concessions:', dbError);
+      return next(createError(500, `Database error: ${dbError.message}`));
+    }
+    
+    // Fetch fee structures for each student to show original vs after concession
+    const FeeStructure = (await import('../models/FeeStructure.js')).default;
+    const studentsWithFeeInfo = await Promise.allSettled(students.map(async (student) => {
+      let originalTotalFee = 0;
+      // After SQL migration: course is stored as string (course name), not ObjectId
+      const courseName = typeof student.course === 'string' ? student.course : (student.course?.name || student.course || 'N/A');
+      
+      try {
+        // After SQL migration: courseName is the course name (string)
+        // FeeStructure.getFeeStructure expects: academicYear, course (name), branch, year, category
+        const branchName = typeof student.branch === 'string' ? student.branch : (student.branch?.name || student.branch || null);
+        if (student.academicYear && courseName && courseName !== 'N/A' && student.year && student.category) {
+          const feeStructure = await FeeStructure.getFeeStructure(
+            student.academicYear,
+            courseName, // Course name (string)
+            branchName, // Branch name (string) or null
+            student.year,
+            student.category
+          );
+          if (feeStructure) {
+            originalTotalFee = feeStructure.totalFee || 0;
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching fee structure for student ${student.rollNumber || student._id}:`, error);
+      }
+      
+      return {
+        ...student,
+        course: courseName, // Return course as string (course name)
+        originalTotalFee,
+        afterConcessionFee: student.totalCalculatedFee || (originalTotalFee > 0 ? originalTotalFee - (student.concession || 0) : 0)
+      };
+    }));
+    
+    // Extract successful results from Promise.allSettled
+    const successfulStudents = studentsWithFeeInfo
+      .filter(result => result.status === 'fulfilled')
+      .map(result => result.value);
+    
+    const failedStudents = studentsWithFeeInfo
+      .filter(result => result.status === 'rejected')
+      .map(result => result.reason);
+    
+    if (failedStudents.length > 0) {
+      console.warn(`Failed to process ${failedStudents.length} students:`, failedStudents);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        students: successfulStudents
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching approved concessions:', error);
+    next(error);
+  }
+};
+
+export const getConcessionApprovals = async (req, res, next) => {
+  try {
+    // Build query for students with concession > 0 and not approved
+    const query = {
+      role: 'student',
+      concession: { $gt: 0 },
+      concessionApproved: false
+    };
+    
+    // Get all students with pending concessions (no pagination for now, can add later if needed)
+    // Note: After SQL migration, course and branch are stored as strings, not ObjectId references
+    let students;
+    try {
+      students = await User.find(query)
+        .populate('concessionRequestedBy', 'username name')
+        .populate('concessionHistory.performedBy', 'username name')
+        .sort({ concessionRequestedAt: -1, createdAt: -1 })
+        .select('name rollNumber course year branch gender category roomNumber studentPhone parentPhone email batch academicYear hostelId hostelStatus address concession concessionRequestedBy concessionRequestedAt concessionHistory calculatedTerm1Fee calculatedTerm2Fee calculatedTerm3Fee totalCalculatedFee')
+        .lean();
+    } catch (dbError) {
+      console.error('Database error fetching concession approvals:', dbError);
+      console.error('Error message:', dbError.message);
+      console.error('Error stack:', dbError.stack);
+      return next(createError(500, `Database error: ${dbError.message}`));
+    }
+    
+    // Fetch fee structures for each student to show original vs after concession
+    const FeeStructure = (await import('../models/FeeStructure.js')).default;
+    const studentsWithFeeInfo = await Promise.allSettled(students.map(async (student) => {
+      let originalTotalFee = 0;
+      // After SQL migration: course is stored as string (course name), not ObjectId
+      const courseName = typeof student.course === 'string' ? student.course : (student.course?.name || student.course || 'N/A');
+      
+      try {
+        // After SQL migration: courseName is the course name (string)
+        // FeeStructure.getFeeStructure expects: academicYear, course (name), branch, year, category
+        const branchName = typeof student.branch === 'string' ? student.branch : (student.branch?.name || student.branch || null);
+        if (student.academicYear && courseName && courseName !== 'N/A' && student.year && student.category) {
+          const feeStructure = await FeeStructure.getFeeStructure(
+            student.academicYear,
+            courseName, // Course name (string)
+            branchName, // Branch name (string) or null
+            student.year,
+            student.category
+          );
+          if (feeStructure) {
+            originalTotalFee = feeStructure.totalFee || 0;
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching fee structure for student ${student.rollNumber || student._id}:`, error);
+      }
+      
+      return {
+        ...student,
+        course: courseName, // Return course as string (course name)
+        originalTotalFee,
+        afterConcessionFee: student.totalCalculatedFee || (originalTotalFee > 0 ? originalTotalFee - (student.concession || 0) : 0)
+      };
+    }));
+    
+    // Extract successful results from Promise.allSettled
+    const successfulStudents = studentsWithFeeInfo
+      .filter(result => result.status === 'fulfilled')
+      .map(result => result.value);
+    
+    const failedStudents = studentsWithFeeInfo
+      .filter(result => result.status === 'rejected')
+      .map(result => result.reason);
+    
+    if (failedStudents.length > 0) {
+      console.warn(`Failed to process ${failedStudents.length} students:`, failedStudents);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        students: successfulStudents
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching concession approvals:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      name: error.name,
+      code: error.code
+    });
+    next(error);
+  }
+};
+
+// Approve concession
+export const approveConcession = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { newConcessionAmount, notes } = req.body;
+    
+    if (req.admin.role !== 'super_admin') {
+      throw createError(403, 'Only super admin can approve concessions');
+    }
+    
+    const student = await User.findById(id);
+    if (!student || student.role !== 'student') {
+      throw createError(404, 'Student not found');
+    }
+    
+    if (student.concession <= 0) {
+      throw createError(400, 'Student does not have a concession');
+    }
+    
+    if (student.concessionApproved) {
+      throw createError(400, 'Concession is already approved');
+    }
+    
+    const previousAmount = student.concession;
+    let finalAmount = previousAmount;
+    
+    // If newConcessionAmount is provided, update the concession amount
+    if (newConcessionAmount !== undefined && newConcessionAmount !== null) {
+      const newAmount = Number(newConcessionAmount);
+      
+      if (newAmount < 0) {
+        throw createError(400, 'Concession amount cannot be negative');
+      }
+      
+      if (newAmount === 0) {
+        throw createError(400, 'Cannot approve with zero amount. Use reject instead.');
+      }
+      
+      finalAmount = newAmount;
+      student.concession = newAmount;
+      
+      // Recalculate fees with new concession
+      const FeeStructure = (await import('../models/FeeStructure.js')).default;
+      try {
+        const feeStructure = await FeeStructure.getFeeStructure(
+          student.academicYear,
+          student.course,
+          student.branch,
+          student.year,
+          student.category
+        );
+        if (feeStructure) {
+          const concessionAmount = newAmount;
+          student.calculatedTerm1Fee = Math.max(0, feeStructure.term1Fee - concessionAmount);
+          let remainingConcession = Math.max(0, concessionAmount - feeStructure.term1Fee);
+          student.calculatedTerm2Fee = Math.max(0, feeStructure.term2Fee - remainingConcession);
+          remainingConcession = Math.max(0, remainingConcession - feeStructure.term2Fee);
+          student.calculatedTerm3Fee = Math.max(0, feeStructure.term3Fee - remainingConcession);
+          student.totalCalculatedFee = student.calculatedTerm1Fee + student.calculatedTerm2Fee + student.calculatedTerm3Fee;
+        }
+      } catch (error) {
+        console.error('Error recalculating fees:', error);
+      }
+    }
+    
+    // Add to history
+    if (!student.concessionHistory) {
+      student.concessionHistory = [];
+    }
+    student.concessionHistory.push({
+      action: previousAmount !== finalAmount ? 'updated' : 'approved',
+      amount: finalAmount,
+      previousAmount: previousAmount !== finalAmount ? previousAmount : null,
+      performedBy: req.admin._id,
+      performedAt: new Date(),
+      notes: notes || ''
+    });
+    
+    student.concessionApproved = true;
+    student.concessionApprovedBy = req.admin._id;
+    student.concessionApprovedAt = new Date();
+    
+    await repairMissingRollNumber(student);
+    await student.save({ validateModifiedOnly: true });
+
+    await syncStudentHostelFeeSafely(student);
+
+    res.json({
+      success: true,
+      message: previousAmount !== finalAmount 
+        ? 'Concession approved and amount updated successfully'
+        : 'Concession approved successfully',
+      data: {
+        student: {
+          id: student._id,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          concession: student.concession,
+          concessionApproved: student.concessionApproved,
+          concessionApprovedBy: student.concessionApprovedBy,
+          concessionApprovedAt: student.concessionApprovedAt
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Reject concession (can also update amount)
+export const rejectConcession = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { newConcessionAmount, reason } = req.body;
+    
+    if (req.admin.role !== 'super_admin') {
+      throw createError(403, 'Only super admin can reject concessions');
+    }
+    
+    const student = await User.findById(id);
+    if (!student || student.role !== 'student') {
+      throw createError(404, 'Student not found');
+    }
+    
+    if (student.concession <= 0) {
+      throw createError(400, 'Student does not have a concession');
+    }
+    
+    const previousAmount = student.concession;
+    
+    // If newConcessionAmount is provided and different, update it
+    if (newConcessionAmount !== undefined && newConcessionAmount !== null) {
+      const newAmount = Number(newConcessionAmount) || 0;
+      
+      if (newAmount < 0) {
+        throw createError(400, 'Concession amount cannot be negative');
+      }
+      
+      // If new amount is 0, remove concession
+      if (newAmount === 0) {
+        student.concession = 0;
+        student.concessionApproved = false;
+        student.concessionApprovedBy = null;
+        student.concessionApprovedAt = null;
+        student.concessionRequestedBy = null;
+        student.concessionRequestedAt = null;
+        // Reset calculated fees to original
+        const FeeStructure = (await import('../models/FeeStructure.js')).default;
+        try {
+          const feeStructure = await FeeStructure.getFeeStructure(
+            student.academicYear,
+            student.course,
+            student.branch,
+            student.year,
+            student.category
+          );
+          if (feeStructure) {
+            student.calculatedTerm1Fee = feeStructure.term1Fee;
+            student.calculatedTerm2Fee = feeStructure.term2Fee;
+            student.calculatedTerm3Fee = feeStructure.term3Fee;
+            student.totalCalculatedFee = feeStructure.totalFee;
+          }
+        } catch (error) {
+          console.error('Error recalculating fees:', error);
+        }
+        
+        // Add to history
+        if (!student.concessionHistory) {
+          student.concessionHistory = [];
+        }
+        student.concessionHistory.push({
+          action: 'rejected',
+          amount: 0,
+          previousAmount: previousAmount,
+          performedBy: req.admin._id,
+          performedAt: new Date(),
+          notes: reason || ''
+        });
+      } else {
+        // Update concession amount and recalculate fees
+        student.concession = newAmount;
+        student.concessionApproved = false;
+        student.concessionRequestedBy = req.admin._id;
+        student.concessionRequestedAt = new Date();
+        
+        // Recalculate fees with new concession
+        const FeeStructure = (await import('../models/FeeStructure.js')).default;
+        try {
+          const feeStructure = await FeeStructure.getFeeStructure(
+            student.academicYear,
+            student.course,
+            student.branch,
+            student.year,
+            student.category
+          );
+          if (feeStructure) {
+            const concessionAmount = newAmount;
+            student.calculatedTerm1Fee = Math.max(0, feeStructure.term1Fee - concessionAmount);
+            let remainingConcession = Math.max(0, concessionAmount - feeStructure.term1Fee);
+            student.calculatedTerm2Fee = Math.max(0, feeStructure.term2Fee - remainingConcession);
+            remainingConcession = Math.max(0, remainingConcession - feeStructure.term2Fee);
+            student.calculatedTerm3Fee = Math.max(0, feeStructure.term3Fee - remainingConcession);
+            student.totalCalculatedFee = student.calculatedTerm1Fee + student.calculatedTerm2Fee + student.calculatedTerm3Fee;
+          }
+        } catch (error) {
+          console.error('Error recalculating fees:', error);
+        }
+        
+        // Add to history
+        if (!student.concessionHistory) {
+          student.concessionHistory = [];
+        }
+        student.concessionHistory.push({
+          action: 'updated',
+          amount: newAmount,
+          previousAmount: previousAmount,
+          performedBy: req.admin._id,
+          performedAt: new Date(),
+          notes: reason || ''
+        });
+      }
+    } else {
+      // Just reject (remove concession)
+      student.concession = 0;
+      student.concessionApproved = false;
+      student.concessionApprovedBy = null;
+      student.concessionApprovedAt = null;
+      student.concessionRequestedBy = null;
+      student.concessionRequestedAt = null;
+      // Reset calculated fees to original
+      const FeeStructure = (await import('../models/FeeStructure.js')).default;
+      try {
+        const feeStructure = await FeeStructure.getFeeStructure(
+          student.academicYear,
+          student.course,
+          student.branch,
+          student.year,
+          student.category
+        );
+        if (feeStructure) {
+          student.calculatedTerm1Fee = feeStructure.term1Fee;
+          student.calculatedTerm2Fee = feeStructure.term2Fee;
+          student.calculatedTerm3Fee = feeStructure.term3Fee;
+          student.totalCalculatedFee = feeStructure.totalFee;
+        }
+      } catch (error) {
+        console.error('Error recalculating fees:', error);
+      }
+      
+      // Add to history
+      if (!student.concessionHistory) {
+        student.concessionHistory = [];
+      }
+      student.concessionHistory.push({
+        action: 'rejected',
+        amount: 0,
+        previousAmount: previousAmount,
+        performedBy: req.admin._id,
+        performedAt: new Date(),
+        notes: reason || ''
+      });
+    }
+    
+    await repairMissingRollNumber(student);
+    await student.save({ validateModifiedOnly: true });
+
+    await syncStudentHostelFeeSafely(student);
+
+    res.json({
+      success: true,
+      message: newConcessionAmount !== undefined && newConcessionAmount !== null && newConcessionAmount !== 0
+        ? 'Concession amount updated successfully'
+        : 'Concession rejected and removed successfully',
+      data: {
+        student: {
+          id: student._id,
+          name: student.name,
+          rollNumber: student.rollNumber,
+          concession: student.concession,
+          concessionApproved: student.concessionApproved
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};

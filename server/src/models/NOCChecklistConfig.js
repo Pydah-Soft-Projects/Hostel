@@ -1,0 +1,53 @@
+import mongoose from 'mongoose';
+
+const nocChecklistConfigSchema = new mongoose.Schema({
+  // Checklist item details
+  description: {
+    type: String,
+    required: true,
+    trim: true,
+    maxLength: [200, 'Description cannot exceed 200 characters']
+  },
+  // Display order
+  order: {
+    type: Number,
+    required: true,
+    default: 0
+  },
+  // Whether this item is active
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  // Created/Updated by
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    default: null
+  },
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    default: null
+  }
+}, {
+  timestamps: true,
+  toJSON: {
+    virtuals: true,
+    transform: (doc, ret) => {
+      ret.id = ret._id;
+      delete ret._id;
+      delete ret.__v;
+      return ret;
+    }
+  }
+});
+
+// Indexes
+nocChecklistConfigSchema.index({ order: 1, isActive: 1 });
+nocChecklistConfigSchema.index({ isActive: 1 });
+
+const NOCChecklistConfig = mongoose.model('NOCChecklistConfig', nocChecklistConfigSchema);
+
+export default NOCChecklistConfig;
+

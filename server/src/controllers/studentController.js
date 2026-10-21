@@ -1,0 +1,601 @@
+import User from '../models/User.js';
+import Counter from '../models/Counter.js';
+import { uploadToS3, deleteFromS3 } from '../utils/s3Service.js';
+import { sendAdminCredentialsSMS } from '../utils/smsService.js';
+import XLSX from 'xlsx';
+import fs from 'fs';
+
+// Function to generate hostel ID
+const generateHostelId = async (gender) => {
+  console.log('🔧 Generating hostel ID for gender:', gender);
+  
+  const currentYear = new Date().getFullYear().toString().slice(-2); // Get last 2 digits of year
+  const prefix = gender === 'Male' ? 'BH' : 'GH';
+  
+  console.log('📅 Current year:', currentYear, 'Prefix:', prefix, 'Gender:', gender);
+  
+  // Use a counter collection to ensure atomic sequence generation
+  const counterId = `hostel_${prefix}${currentYear}`;
+  
+  // Use findOneAndUpdate with upsert to atomically increment the counter
+  const counter = await Counter.findOneAndUpdate(
+    { _id: counterId },
+    { $inc: { sequence: 1 } },
+    { 
+      new: true, 
+      upsert: true,
+      setDefaultsOnInsert: true 
+    }
+  );
+  
+  const sequence = counter.sequence;
+  const hostelId = `${prefix}${currentYear}${sequence.toString().padStart(3, '0')}`;
+  console.log('Generated hostel ID:', hostelId);
+  
+  // Format: BH25001, GH25002, etc.
+  return hostelId;
+};
+
+// Upload students via Excel
+export const uploadStudents = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(sheet);
+    let added = 0, skipped = 0;
+    
+    for (const row of data) {
+      const {
+        Name, RollNumber, Degree, Branch, Year, RoomNumber, StudentPhone, ParentPhone, Gender
+      } = row;
+      
+      if (!Name || !RollNumber) { skipped++; continue; }
+      
+      const exists = await User.findOne({ rollNumber: RollNumber });
+      if (exists) { skipped++; continue; }
+      
+      // Look up course and branch ObjectIds
+      const CourseModel = (await import('../models/Course.js')).default;
+      const BranchModel = (await import('../models/Branch.js')).default;
+      const courseDoc = await CourseModel.findOne({ name: Degree });
+      const branchDoc = await BranchModel.findOne({ name: Branch });
+      
+      // Generate hostel ID
+      const hostelId = await generateHostelId(Gender || 'Male'); // Default to Male if gender not specified
+      
+      // Handle email properly - only set if provided and not empty
+      const emailValue = row.Email || row.email || '';
+      const finalEmail = emailValue === '' ? undefined : emailValue;
+
+      await User.create({
+        name: Name,
+        rollNumber: RollNumber,
+        hostelId: hostelId,
+        course: courseDoc ? courseDoc._id : undefined,
+        branch: branchDoc ? branchDoc._id : undefined,
+        year: Year,
+        gender: Gender || 'Male',
+        roomNumber: RoomNumber,
+        studentPhone: StudentPhone,
+        parentPhone: ParentPhone,
+        email: finalEmail,
+        password: 'changeme',
+        role: 'student',
+        isRegistered: false
+      });
+      added++;
+    }
+    fs.unlinkSync(req.file.path);
+    res.json({ message: `Added: ${added}, Skipped: ${skipped}` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error uploading students', error });
+  }
+};
+
+// Manual add student
+export const addStudent = async (req, res) => {
+  try {
+    console.log('Received request body:', req.body);
+    
+    const { 
+      name, 
+      rollNumber, 
+      course, 
+      branch, 
+      year, 
+      roomNumber, 
+      studentPhone, 
+      parentPhone, 
+      gender,
+      category,
+      batch,
+      academicYear,
+      email
+    } = req.body;
+    
+    console.log('Extracted fields:', { name, rollNumber, course, branch, year, gender });
+    
+    if (await User.findOne({ rollNumber })) {
+      return res.status(400).json({ message: 'Student already exists' });
+    }
+    
+    // Generate hostel ID
+    const hostelId = await generateHostelId(gender || 'Male');
+    
+    // Handle email properly - only set if provided and not empty
+    const emailValue = email ? String(email).trim() : '';
+    const finalEmail = emailValue === '' ? undefined : emailValue;
+
+    const studentData = {
+      name, 
+      rollNumber, 
+      course, 
+      branch, 
+      year, 
+      roomNumber, 
+      studentPhone, 
+      parentPhone,
+      gender: gender || 'Male',
+      category: category || 'A',
+      batch: batch || '',
+      academicYear: academicYear || '',
+      email: finalEmail,
+      hostelId,
+      password: 'changeme', 
+      role: 'student', 
+      isRegistered: false,
+      applicationStatus: { $in: ['Active', 'Extended'] },
+      graduationStatus: 'Enrolled'
+    };
+    
+    console.log('Creating student with data:', studentData);
+    
+    const student = await User.create(studentData);
+    
+    console.log('Created student:', student);
+    
+    // Send credentials via SMS if student phone is provided
+    let deliveryResult = null;
+    
+    if (studentPhone && studentPhone.trim()) {
+      try {
+        console.log('📱 Sending student credentials via SMS to:', studentPhone);
+        deliveryResult = await sendAdminCredentialsSMS(
+          studentPhone,
+          rollNumber, // Using rollNumber as username
+          'changeme' // Default password
+        );
+        console.log('📱 SMS sent successfully:', deliveryResult);
+      } catch (smsError) {
+        console.error('📱 Error sending SMS:', smsError);
+        // Don't fail the creation if SMS fails, but log it
+        deliveryResult = { error: smsError.message };
+      }
+    } else {
+      console.log('📱 No student phone number provided, skipping SMS');
+      deliveryResult = { message: 'No SMS sent - no phone number provided' };
+    }
+    
+    // Remove password from response
+    const studentResponse = student.toObject();
+    delete studentResponse.password;
+    
+    res.json({
+      success: true,
+      data: studentResponse,
+      deliveryResult
+    });
+  } catch (error) {
+    console.error('Error adding student:', error);
+    res.status(500).json({ message: 'Error adding student', error: error.message });
+  }
+};
+
+// List all students
+export const listStudents = async (req, res) => {
+  try {
+    const students = await User.find({ role: 'student' }).select('-password');
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching students', error });
+  }
+};
+
+// Edit student
+export const editStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const update = req.body;
+    console.log('Update payload:', update); // Debug log
+    delete update.password;
+    delete update.hostelId; // Prevent hostel ID from being modified
+    // Map legacy hostelStatus updates onto applicationStatus
+    if (update.hostelStatus) {
+      const statusNorm = String(update.hostelStatus).toLowerCase();
+      if (statusNorm === 'inactive') update.applicationStatus = 'Expired';
+      else if (statusNorm === 'active') update.applicationStatus = 'Active';
+      delete update.hostelStatus;
+    }
+    if (
+      update.applicationStatus &&
+      !['Active', 'Expired', 'Extended', 'Withdrawn'].includes(update.applicationStatus)
+    ) {
+      return res.status(400).json({ message: 'Invalid application status' });
+    }
+    const student = await User.findByIdAndUpdate(id, update, { new: true }).select('-password');
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json(student);
+  } catch (error) {
+    res.status(500).json({ message: 'Error editing student', error });
+  }
+};
+
+// Delete student
+export const deleteStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const student = await User.findByIdAndDelete(id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    
+    // Clean up related fee reminders
+    try {
+      const FeeReminder = (await import('../models/FeeReminder.js')).default;
+      const deletedReminders = await FeeReminder.deleteMany({ student: id });
+      console.log(`🧹 Cleaned up ${deletedReminders.deletedCount} fee reminders for deleted student: ${student.name}`);
+    } catch (cleanupError) {
+      console.error('Error cleaning up fee reminders:', cleanupError);
+      // Continue with student deletion even if cleanup fails
+    }
+    
+    res.json({ message: 'Student deleted' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting student', error });
+  }
+}; 
+
+export const updateProfile = async (req, res) => {
+  try {
+    const { year } = req.body;
+    const studentId = req.user.id;
+
+    if (!year) {
+      return res.status(400).json({
+        success: false,
+        message: 'Year is required'
+      });
+    }
+
+    const student = await User.findById(studentId);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Validate year based on course
+    const maxYear = student.degree === 'B.Tech' || student.degree === 'Pharmacy' ? 4 : 3;
+    if (year < 1 || year > maxYear) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid year. Must be between 1 and ${maxYear} for ${student.degree}`
+      });
+    }
+
+    student.year = year;
+    await student.save();
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: student
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating profile'
+    });
+  }
+};
+
+// Get student profile
+export const getProfile = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const student = await User.findById(studentId).select('-password').lean();
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    const { enrichStudentAcademics } = await import('../utils/studentAcademicEnricher.js');
+    const { overlayStudentDtoWithHostelRequest } = await import('../services/hostelRequestService.js');
+    let enriched = await enrichStudentAcademics(student);
+    enriched = await overlayStudentDtoWithHostelRequest(enriched);
+
+    res.json({
+      success: true,
+      data: enriched
+    });
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profile'
+    });
+  }
+};
+
+// Update student profile photos
+export const updateProfilePhotos = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const student = await User.findById(studentId);
+    
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Handle guardian photo uploads (student profile photo comes from SDMS)
+    if (req.files) {
+      if (req.files.guardianPhoto1 && req.files.guardianPhoto1[0]) {
+        // Delete old photo if exists
+        if (student.guardianPhoto1) {
+          try {
+            await deleteFromS3(student.guardianPhoto1);
+          } catch (error) {
+            console.error('Error deleting old guardian photo 1:', error);
+          }
+        }
+        // Upload new photo
+        student.guardianPhoto1 = await uploadToS3(req.files.guardianPhoto1[0], 'guardian-photos');
+      }
+      if (req.files.guardianPhoto2 && req.files.guardianPhoto2[0]) {
+        // Delete old photo if exists
+        if (student.guardianPhoto2) {
+          try {
+            await deleteFromS3(student.guardianPhoto2);
+          } catch (error) {
+            console.error('Error deleting old guardian photo 2:', error);
+          }
+        }
+        // Upload new photo
+        student.guardianPhoto2 = await uploadToS3(req.files.guardianPhoto2[0], 'guardian-photos');
+      }
+    }
+
+    await student.save();
+
+    const { enrichStudentAcademics } = await import('../utils/studentAcademicEnricher.js');
+    const enriched = await enrichStudentAcademics(student.toObject());
+
+    res.json({
+      success: true,
+      message: 'Profile photos updated successfully',
+      data: {
+        studentPhoto: enriched.studentPhoto || null,
+        guardianPhoto1: student.guardianPhoto1,
+        guardianPhoto2: student.guardianPhoto2
+      }
+    });
+  } catch (error) {
+    console.error('Error updating profile photos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating profile photos'
+    });
+  }
+};
+const normalizeCourseName = (courseName) => {
+  if (!courseName) return '';
+  return courseName.trim().toUpperCase().replace(/\s+/g, ' ');
+};
+
+const getPrincipalAllowedCourses = async (principal) => {
+  let allowedCourses = [];
+  if (principal.assignedCollegeIds && principal.assignedCollegeIds.length > 0) {
+    try {
+      const { fetchCoursesFromSQL } = await import('../utils/sqlService.js');
+      const sqlCoursesResult = await fetchCoursesFromSQL();
+      if (sqlCoursesResult.success) {
+        const matchingCourses = sqlCoursesResult.data.filter(course => {
+          const collegeMatch = course.college_id && principal.assignedCollegeIds.includes(course.college_id);
+          const levelMatch = (!principal.assignedLevels || principal.assignedLevels.length === 0) || 
+                            (course.level && principal.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
+          return collegeMatch && levelMatch;
+        });
+        allowedCourses = matchingCourses.map(c => normalizeCourseName(c.name));
+      }
+    } catch (err) {
+      console.error('🎓 Error fetching SQL courses for principal:', err);
+    }
+  }
+  if (allowedCourses.length === 0) {
+    if (principal.assignedCourses && principal.assignedCourses.length > 0) {
+      allowedCourses = principal.assignedCourses.map(c => normalizeCourseName(c.trim()));
+    } else if (principal.course) {
+      allowedCourses = [normalizeCourseName(principal.course.trim())];
+    }
+  }
+  return allowedCourses;
+};
+
+// Generate student count report summary (nested levels: College -> Course -> Hostel -> Category -> Year)
+export const getStudentCountReport = async (req, res) => {
+  try {
+    const { academicYear, hostelStatus } = req.query;
+
+    let enrichedStudents;
+    if (academicYear) {
+      const { fetchStudentsForAcademicYear } = await import('../utils/applicationExpiryService.js');
+      const result = await fetchStudentsForAcademicYear({
+        academicYear,
+        filters: { hostelStatus },
+        page: 1,
+        limit: 1000000,
+        skipEnrichment: true
+      });
+      enrichedStudents = result.students;
+    } else {
+      const query = { role: 'student' };
+      if (hostelStatus) {
+      const statusNorm = String(hostelStatus).toLowerCase();
+      if (statusNorm === 'active') {
+        query.applicationStatus = { $in: ['Active', 'Extended'] };
+      } else if (statusNorm === 'inactive' || statusNorm === 'expired') {
+        query.applicationStatus = { $in: ['Expired', 'Withdrawn'] };
+      } else {
+        query.applicationStatus = hostelStatus;
+      }
+    }
+
+      enrichedStudents = await User.find(query)
+        .populate('hostel', 'name')
+        .populate('hostelCategory', 'name')
+        .select('college course hostel hostelCategory year name rollNumber branch')
+        .lean();
+    }
+
+    // Apply Principal permissions course/branch filters to ensure count alignment
+    const adminUser = req.admin;
+    if (adminUser?.role === 'principal') {
+      const allowedCourses = await getPrincipalAllowedCourses(adminUser);
+      enrichedStudents = enrichedStudents.filter(student => {
+        const normCourse = normalizeCourseName(student.course);
+        if (!allowedCourses.includes(normCourse)) return false;
+
+        if (adminUser.assignedCourses && adminUser.assignedCourses.length > 1) {
+          return true;
+        }
+        if (adminUser.branch) {
+          const principalBranch = adminUser.branch.trim().toLowerCase();
+          const studentBranch = (student.branch || '').trim().toLowerCase();
+          return studentBranch === principalBranch;
+        }
+        return true;
+      });
+    }
+
+    const overallCount = enrichedStudents.length;
+
+    // Grouping structure
+    const collegesMap = {};
+
+    enrichedStudents.forEach(student => {
+      const collegeName = student.college?.name || 'Unassigned College';
+      const courseName = student.course || 'Unassigned Course';
+      const hostelName = student.hostel?.name || 'Unassigned Hostel';
+      const categoryName = student.hostelCategory?.name || 'Unassigned Category';
+      const yearVal = student.year ? `${student.year} Year` : 'Unassigned Year';
+
+      // 1. College level
+      if (!collegesMap[collegeName]) {
+        collegesMap[collegeName] = {
+          name: collegeName,
+          count: 0,
+          courses: {}
+        };
+      }
+      collegesMap[collegeName].count++;
+
+      // 2. Course level
+      const college = collegesMap[collegeName];
+      if (!college.courses[courseName]) {
+        college.courses[courseName] = {
+          name: courseName,
+          count: 0,
+          hostels: {}
+        };
+      }
+      college.courses[courseName].count++;
+
+      // 3. Hostel level
+      const course = college.courses[courseName];
+      if (!course.hostels[hostelName]) {
+        course.hostels[hostelName] = {
+          name: hostelName,
+          count: 0,
+          categories: {}
+        };
+      }
+      course.hostels[hostelName].count++;
+
+      // 4. Category level
+      const hostel = course.hostels[hostelName];
+      if (!hostel.categories[categoryName]) {
+        hostel.categories[categoryName] = {
+          name: categoryName,
+          count: 0,
+          years: {}
+        };
+      }
+      hostel.categories[categoryName].count++;
+
+      // 5. Year level
+      const category = hostel.categories[categoryName];
+      if (!category.years[yearVal]) {
+        category.years[yearVal] = 0;
+      }
+      category.years[yearVal]++;
+    });
+
+    // Convert nested maps into sorted arrays for easier frontend consumption
+    const result = Object.values(collegesMap).map(coll => {
+      const coursesArr = Object.values(coll.courses).map(crs => {
+        const hostelsArr = Object.values(crs.hostels).map(hst => {
+          const categoriesArr = Object.values(hst.categories).map(cat => {
+            const yearsArr = Object.entries(cat.years).map(([yr, cnt]) => ({
+              year: yr,
+              count: cnt
+            })).sort((a, b) => a.year.localeCompare(b.year));
+
+            return {
+              name: cat.name,
+              count: cat.count,
+              years: yearsArr
+            };
+          }).sort((a, b) => a.name.localeCompare(b.name));
+
+          return {
+            name: hst.name,
+            count: hst.count,
+            categories: categoriesArr
+          };
+        }).sort((a, b) => a.name.localeCompare(b.name));
+
+        return {
+          name: crs.name,
+          count: crs.count,
+          hostels: hostelsArr
+        };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+
+      return {
+        name: coll.name,
+        count: coll.count,
+        courses: coursesArr
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({
+      success: true,
+      overallCount,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error generating student count report:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error generating report',
+      error: error.message
+    });
+  }
+}; 
