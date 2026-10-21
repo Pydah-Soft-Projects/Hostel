@@ -287,7 +287,7 @@ app.use(errorHandler);
 import { setupMenuImageCleanup } from './utils/setupCleanup.js';
 
 // Start server
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 httpServer.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   
