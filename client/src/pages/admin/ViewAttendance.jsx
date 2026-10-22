@@ -45,6 +45,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
   const [attendance, setAttendance] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [viewMode, setViewMode] = useState('date'); // 'date' or 'range'
+  const [summaryGroupBy, setSummaryGroupBy] = useState('college');
   const [dateRange, setDateRange] = useState({
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
@@ -349,6 +350,73 @@ const ViewAttendance = ({ onStatsUpdate }) => {
     }
     return organizeAttendanceByStudent(attendance, dateRange.startDate, dateRange.endDate);
   }, [viewMode, attendance, dateRange.startDate, dateRange.endDate]);
+
+  const attendanceSummary = useMemo(() => {
+    const studentSummaries = viewMode === 'date'
+      ? attendance.map(record => {
+        const status = getAttendanceStatus(record);
+        return {
+          student: record.student,
+          totalDays: 1,
+          presentDays: status === 'Present' ? 1 : 0,
+          partialDays: status === 'Partial' ? 1 : 0,
+          absentDays: status === 'Absent' ? 1 : 0,
+          onLeaveDays: status === 'On Leave' ? 1 : 0
+        };
+      })
+      : organizedAttendance.map(({ student, summary, attendanceRecords }) => ({
+        student,
+        totalDays: summary.totalDays,
+        presentDays: summary.presentDays,
+        partialDays: summary.partialDays,
+        absentDays: summary.absentDays,
+        onLeaveDays: attendanceRecords.filter(record => getAttendanceStatus(record) === 'On Leave').length
+      }));
+
+    const grouped = new Map();
+    studentSummaries.forEach(summary => {
+      if (!summary.student) return;
+      const courseName = getCourseName(summary.student.course).trim().toLowerCase();
+      const courseInfo = courses.find(course => course.name?.trim().toLowerCase() === courseName);
+      const collegeName = summary.student.college?.name
+        || summary.student.collegeName
+        || courseInfo?.college?.name
+        || 'Unassigned';
+      const yearName = summary.student.year?.name || summary.student.year || 'Unspecified';
+      const groupName = summaryGroupBy === 'college' ? collegeName : String(yearName);
+
+      if (!grouped.has(groupName)) {
+        grouped.set(groupName, {
+          name: groupName,
+          studentCount: 0,
+          totalDays: 0,
+          eligibleDays: 0,
+          presentDays: 0,
+          partialDays: 0,
+          absentDays: 0,
+          onLeaveDays: 0
+        });
+      }
+
+      const group = grouped.get(groupName);
+      group.studentCount += 1;
+      group.totalDays += summary.totalDays;
+      group.eligibleDays += Math.max(summary.totalDays - summary.onLeaveDays, 0);
+      group.presentDays += summary.presentDays;
+      group.partialDays += summary.partialDays;
+      group.absentDays += summary.absentDays;
+      group.onLeaveDays += summary.onLeaveDays;
+    });
+
+    return Array.from(grouped.values())
+      .map(group => ({
+        ...group,
+        attendancePercentage: group.eligibleDays > 0
+          ? Math.round(((group.presentDays + group.partialDays * 0.33) / group.eligibleDays) * 100)
+          : 0
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [attendance, organizedAttendance, viewMode, summaryGroupBy, courses]);
 
   // Get attendance percentage color
   const getPercentageColor = (percentage) => {
@@ -867,7 +935,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         transition={{ delay: 0.2 }}
         className="hidden lg:block bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6 mb-4 sm:mb-6"
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-3 sm:mb-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${viewMode === 'range' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3 sm:gap-4 mb-3 sm:mb-4`}>
           {/* View Mode Toggle */}
           <div>
             <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">View Mode</label>
@@ -919,7 +987,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
           )}
 
           {/* Live / AY Wise */}
-          <div className="sm:col-span-2 lg:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-1">
             <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
               Roster mode
               {analyticsMode === 'ay' && filters.academicYear ? (
@@ -977,7 +1045,10 @@ const ViewAttendance = ({ onStatsUpdate }) => {
             </div>
           </div>
 
-          {/* Status Filter */}
+        </div>
+
+        {/* Additional Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
           <div>
             <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Status</label>
             <select
@@ -993,10 +1064,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
               <option value="On Leave">On Leave</option>
             </select>
           </div>
-        </div>
 
-        {/* Additional Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div>
             <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Course</label>
             <select
@@ -1062,7 +1130,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         transition={{ delay: 0.3 }}
         className="bg-white rounded-lg shadow-sm overflow-hidden"
       >
-        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
+        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <h2 className="text-base sm:text-lg font-semibold text-gray-900">
             Attendance Records ({attendance.length})
             <span className="ml-2 text-xs sm:text-sm font-normal text-gray-500">
@@ -1071,6 +1139,72 @@ const ViewAttendance = ({ onStatsUpdate }) => {
                 : '(Live · active)'}
             </span>
           </h2>
+          <div className="inline-flex w-full sm:w-auto rounded-lg border border-gray-200 bg-gray-50 p-1" aria-label="Attendance abstract grouping">
+            {[
+              { id: 'college', label: 'College-wise' },
+              { id: 'year', label: 'Year-wise' }
+            ].map(option => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setSummaryGroupBy(option.id)}
+                aria-pressed={summaryGroupBy === option.id}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${summaryGroupBy === option.id
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+                  }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-3 sm:px-6 py-4 border-b border-gray-200 bg-gray-50/70">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-1 mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">
+                {summaryGroupBy === 'college' ? 'College-wise Attendance Abstract' : 'Year-wise Attendance Abstract'}
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {viewMode === 'date' ? 'Summary for the selected date' : 'Summary across the selected date range'}
+              </p>
+            </div>
+          </div>
+          {attendanceSummary.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">{summaryGroupBy === 'college' ? 'College' : 'Year'}</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Students</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'Present' : 'Present Days'}</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'Partial' : 'Partial Days'}</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'Absent' : 'Absent Days'}</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'On Leave' : 'Leave Days'}</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Attendance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {attendanceSummary.map(group => (
+                    <tr key={group.name} className="hover:bg-gray-50">
+                      <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{group.name}</td>
+                      <td className="px-3 py-2.5 text-sm text-right text-gray-700">{group.studentCount}</td>
+                      <td className="px-3 py-2.5 text-sm text-right text-green-700">{group.presentDays}</td>
+                      <td className="px-3 py-2.5 text-sm text-right text-amber-700">{group.partialDays}</td>
+                      <td className="px-3 py-2.5 text-sm text-right text-red-700">{group.absentDays}</td>
+                      <td className="px-3 py-2.5 text-sm text-right text-blue-700">{group.onLeaveDays}</td>
+                      <td className="px-3 py-2.5 text-sm text-right font-semibold text-gray-900">{group.attendancePercentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6 text-center text-sm text-gray-500">
+              No attendance data to summarize for the selected filters.
+            </p>
+          )}
         </div>
 
         <div className="overflow-x-auto">

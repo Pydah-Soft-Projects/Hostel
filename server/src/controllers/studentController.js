@@ -4,6 +4,7 @@ import { uploadToS3, deleteFromS3 } from '../utils/s3Service.js';
 import { sendAdminCredentialsSMS } from '../utils/smsService.js';
 import XLSX from 'xlsx';
 import fs from 'fs';
+import { getAllowedCourseNames } from '../utils/adminUtils.js';
 
 // Function to generate hostel ID
 const generateHostelId = async (gender) => {
@@ -400,32 +401,7 @@ const normalizeCourseName = (courseName) => {
 };
 
 const getPrincipalAllowedCourses = async (principal) => {
-  let allowedCourses = [];
-  if (principal.assignedCollegeIds && principal.assignedCollegeIds.length > 0) {
-    try {
-      const { fetchCoursesFromSQL } = await import('../utils/sqlService.js');
-      const sqlCoursesResult = await fetchCoursesFromSQL();
-      if (sqlCoursesResult.success) {
-        const matchingCourses = sqlCoursesResult.data.filter(course => {
-          const collegeMatch = course.college_id && principal.assignedCollegeIds.includes(course.college_id);
-          const levelMatch = (!principal.assignedLevels || principal.assignedLevels.length === 0) || 
-                            (course.level && principal.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
-          return collegeMatch && levelMatch;
-        });
-        allowedCourses = matchingCourses.map(c => normalizeCourseName(c.name));
-      }
-    } catch (err) {
-      console.error('🎓 Error fetching SQL courses for principal:', err);
-    }
-  }
-  if (allowedCourses.length === 0) {
-    if (principal.assignedCourses && principal.assignedCourses.length > 0) {
-      allowedCourses = principal.assignedCourses.map(c => normalizeCourseName(c.trim()));
-    } else if (principal.course) {
-      allowedCourses = [normalizeCourseName(principal.course.trim())];
-    }
-  }
-  return allowedCourses;
+  return (await getAllowedCourseNames(principal)).map(normalizeCourseName);
 };
 
 // Generate student count report summary (nested levels: College -> Course -> Hostel -> Category -> Year)

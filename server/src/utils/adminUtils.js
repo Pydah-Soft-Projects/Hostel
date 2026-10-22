@@ -65,16 +65,17 @@ export const resolveBranchName = async (branchValue) => {
  * Get allowed course names for an admin based on their assignments
  */
 export const getAllowedCourseNames = async (admin) => {
-  const { assignedCourses, assignedCollegeIds, assignedCollegeId, assignedLevels, course } = admin;
+  const { assignedCourses, assignedCollegeIds, assignedCollegeId, assignedLevels, assignedCollegeScopes, course } = admin;
   const allowedCourseNames = new Set();
+  const hasExplicitCollegeScopes = assignedCollegeScopes?.length > 0;
 
   // 1. Legacy/Direct singular course (for principals)
-  if (course) {
+  if (course && !hasExplicitCollegeScopes) {
     allowedCourseNames.add(course.trim());
   }
 
   // 2. Legacy/Direct Course Assignment (for sub_admins)
-  if (assignedCourses && assignedCourses.length > 0) {
+  if (!hasExplicitCollegeScopes && assignedCourses && assignedCourses.length > 0) {
     assignedCourses.forEach(c => {
       if (c) allowedCourseNames.add(c.trim());
     });
@@ -85,17 +86,25 @@ export const getAllowedCourseNames = async (admin) => {
     ? assignedCollegeIds 
     : (assignedCollegeId ? [assignedCollegeId] : []);
   
-  if (colleges.length > 0 && assignedLevels && assignedLevels.length > 0) {
+  const collegeScopes = assignedCollegeScopes?.length
+    ? assignedCollegeScopes.map(scope => ({
+      collegeId: Number(scope.collegeId),
+      levels: (scope.levels || []).map(level => level.toLowerCase().trim())
+    }))
+    : colleges.map(collegeId => ({
+      collegeId: Number(collegeId),
+      levels: (assignedLevels || []).map(level => level.toLowerCase().trim())
+    }));
+
+  if (collegeScopes.length > 0) {
     try {
       const allSQLCourses = await getCoursesFromSQL();
-      
-      // Normalize levels for comparison
-      const normalizedLevels = assignedLevels.map(l => l.toLowerCase().trim());
-      
-      const matchedCourses = allSQLCourses.filter(c => 
-        c.college && colleges.includes(Number(c.college.id)) && 
-        c.level && normalizedLevels.includes(c.level.toLowerCase().trim())
-      );
+
+      const matchedCourses = allSQLCourses.filter(course => {
+        const scope = collegeScopes.find(item => item.collegeId === Number(course.college?.id));
+        if (!scope) return false;
+        return scope.levels.length === 0 || (course.level && scope.levels.includes(course.level.toLowerCase().trim()));
+      });
       
       matchedCourses.forEach(c => {
         if (c.name) allowedCourseNames.add(c.name.trim());

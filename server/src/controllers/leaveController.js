@@ -1007,6 +1007,103 @@ export const getAllLeaveRequests = async (req, res, next) => {
   }
 };
 
+export const getLeaveApprovalAbstract = async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+      throw createError(400, 'A valid date is required');
+    }
+
+    const start = getISTStartOfDay(date);
+    const end = getISTEndOfDay(date);
+
+    const baseMatch = { reason: { $not: /^Bulk outing:/ } };
+
+    if (req.admin.role === 'sub_admin' && req.admin.permissions?.includes('leave_management')) {
+      const allowedCourses = await getAllowedCourseNames(req.admin);
+      if (!allowedCourses.length) {
+        return res.json({
+          success: true,
+          data: {
+            date,
+            totals: { requests: 0, processed: 0, approved: 0, rejected: 0, pending: 0 },
+            byType: []
+          }
+        });
+      }
+      baseMatch.course = { $in: allowedCourses };
+    }
+
+    const pendingStatuses = [
+      'Pending',
+      'Pending OTP Verification',
+      'Warden Verified',
+      'Warden Recommended',
+      'Pending Principal Approval'
+    ];
+    const approvedStatuses = ['Approved', 'Principal Approved'];
+    const rejectedStatuses = ['Rejected', 'Principal Rejected'];
+
+    const [createdCounts, processedCounts] = await Promise.all([
+      Leave.aggregate([
+        { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id: '$applicationType',
+            requests: { $sum: 1 },
+            pending: { $sum: { $cond: [{ $in: ['$status', pendingStatuses] }, 1, 0] } }
+          }
+        }
+      ]),
+      Leave.aggregate([
+        { $match: { ...baseMatch, status: { $in: [...approvedStatuses, ...rejectedStatuses] } } },
+        {
+          $addFields: {
+            approvalProcessedAt: {
+              $ifNull: ['$approvedAt', { $ifNull: ['$decidedAt', '$updatedAt'] }]
+            }
+          }
+        },
+        { $match: { approvalProcessedAt: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id: '$applicationType',
+            processed: { $sum: 1 },
+            approved: { $sum: { $cond: [{ $in: ['$status', approvedStatuses] }, 1, 0] } },
+            rejected: { $sum: { $cond: [{ $in: ['$status', rejectedStatuses] }, 1, 0] } }
+          }
+        }
+      ])
+    ]);
+
+    const typeNames = ['Leave', 'Permission', 'Stay in Hostel'];
+    const byType = typeNames.map(type => {
+      const created = createdCounts.find(item => item._id === type) || {};
+      const processed = processedCounts.find(item => item._id === type) || {};
+      return {
+        applicationType: type,
+        requests: created.requests || 0,
+        pending: created.pending || 0,
+        processed: processed.processed || 0,
+        approved: processed.approved || 0,
+        rejected: processed.rejected || 0
+      };
+    });
+
+    const totals = byType.reduce((acc, item) => ({
+      requests: acc.requests + item.requests,
+      pending: acc.pending + item.pending,
+      processed: acc.processed + item.processed,
+      approved: acc.approved + item.approved,
+      rejected: acc.rejected + item.rejected
+    }), { requests: 0, pending: 0, processed: 0, approved: 0, rejected: 0 });
+
+    res.json({ success: true, data: { date, totals, byType } });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Verify OTP and approve leave
 export const verifyOTPAndApprove = async (req, res, next) => {
   try {
@@ -1933,7 +2030,7 @@ export const getStayInHostelRequestsForPrincipal = async (req, res, next) => {
     const { status, principalDecision, wardenRecommendation, page = 1, limit = 10, fromDate, toDate } = req.query;
     
     // Get principal details
-    const principal = await Admin.findById(req.principal._id).select('course branch assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(req.principal._id).select('course branch assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     
     if (!principal) {
       throw createError(404, 'Principal not found');
@@ -2350,7 +2447,7 @@ export const getPrincipalLeaveRequests = async (req, res, next) => {
     const principalId = req.principal._id;
     
     // Get principal's assigned details
-    const principal = await Admin.findById(principalId).select('course branch assignedCollegeIds assignedCollegeId assignedLevels assignedCourses');
+    const principal = await Admin.findById(principalId).select('course branch assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels assignedCourses');
     
     if (!principal) {
       throw createError(400, 'Principal not found');
@@ -2481,7 +2578,7 @@ export const principalApproveLeave = async (req, res, next) => {
     console.log('Request body:', req.body);
 
     // Get principal's assigned details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       throw createError(404, 'Principal not found');
     }
@@ -2577,7 +2674,7 @@ export const principalRejectLeave = async (req, res, next) => {
     const principalId = req.principal._id;
 
     // Get principal's assigned details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       throw createError(404, 'Principal not found');
     }
@@ -2663,7 +2760,7 @@ export const principalDecision = async (req, res, next) => {
     const principalId = req.principal._id || req.user.id;
 
     // Get principal details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       throw createError(404, 'Principal not found');
     }
@@ -2748,7 +2845,7 @@ export const getStudentLeaveHistory = async (req, res, next) => {
     const principalId = req.user.id;
 
     // Get principal details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       throw createError(404, 'Principal not found');
     }

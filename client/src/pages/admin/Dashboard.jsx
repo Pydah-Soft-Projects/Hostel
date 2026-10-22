@@ -942,7 +942,7 @@ const AdminDashboardLayout = () => (
     <Route path="rooms/management" element={<RoomManagement />} />
     <Route path="rooms/electricity" element={<ElectricityBills />} />
     <Route path="staff-guests" element={
-      <ProtectedSection permission="staff_guests_management" sectionName="Staff/Guests Management" requiredAccess="full">
+      <ProtectedSection permission="staff_guests_management" sectionName="Staff/Guests Management">
         <StaffGuestsManagement />
       </ProtectedSection>
     } />

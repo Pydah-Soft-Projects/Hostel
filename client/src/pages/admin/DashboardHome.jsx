@@ -54,6 +54,28 @@ import { hasPermission } from '../../utils/permissionUtils';
 // Normalize text for consistent grouping (handles plain strings or nested objects)
 const normalizeText = (value) => (value || '').toString().trim().toUpperCase();
 
+const summarizeAttendanceByCourse = (records = []) => records.reduce((summary, record) => {
+  const course = record.student?.course;
+  const courseName = typeof course === 'object' ? course?.name : course;
+  const courseKey = normalizeText(courseName);
+  if (!courseKey || record.student?.isOnLeave) return summary;
+
+  if (!summary[courseKey]) {
+    summary[courseKey] = { total: 0, fullyPresent: 0, partiallyPresent: 0, absent: 0, percentage: 0 };
+  }
+
+  const courseSummary = summary[courseKey];
+  courseSummary.total += 1;
+  const markedSessions = [record.morning, record.evening, record.night].filter(Boolean).length;
+  if (markedSessions === 3) courseSummary.fullyPresent += 1;
+  else if (markedSessions > 0) courseSummary.partiallyPresent += 1;
+  else courseSummary.absent += 1;
+  courseSummary.percentage = Math.round(
+    ((courseSummary.fullyPresent + courseSummary.partiallyPresent * 0.33) / courseSummary.total) * 100
+  );
+  return summary;
+}, {});
+
 // Enhanced StatCard component with drag and drop support
 const DraggableStatCard = ({ id, icon: Icon, label, value, color, extra, trend, trendValue, onClick, animateDelay = 0 }) => {
   const [isAnimating, setIsAnimating] = React.useState(true);
@@ -286,8 +308,7 @@ const DashboardHome = () => {
   // Count visible modules in left column
   const visibleLeftModules = useMemo(() => {
     let count = 0;
-    if (canViewStudents) count++;
-    if (canViewAttendance) count++;
+    if (canViewStudents || canViewAttendance) count++;
     if (canViewFinancial) count++;
     if (canViewComplaints) count++;
     if (canViewLeaves) count++;
@@ -323,7 +344,9 @@ const DashboardHome = () => {
         partiallyPresent: 0,
         morningPresent: 0,
         eveningPresent: 0,
-        nightPresent: 0
+        nightPresent: 0,
+        byCourseToday: {},
+        byCourseYesterday: {}
       },
       trend: []
     },
@@ -337,6 +360,7 @@ const DashboardHome = () => {
     },
     complaints: {
       total: 0,
+      pending: 0,
       active: 0,
       resolved: 0,
       inProgress: 0,
@@ -354,7 +378,8 @@ const DashboardHome = () => {
       occupied: 0,
       available: 0,
       occupancyRate: 0,
-      byGender: []
+      byGender: [],
+      byHostel: []
     },
     communication: {
       activeAnnouncements: 0,
@@ -394,6 +419,56 @@ const DashboardHome = () => {
             leaves: sData.leaves || prev.leaves,
             rooms: sData.rooms || prev.rooms,
             communication: sData.communication || prev.communication
+          }));
+        }
+
+        if (canViewRooms) {
+          const roomStatsEndpoint = analyticsMode === 'ay'
+            ? `/api/admin/rooms/stats?academicYear=${selectedAcademicYear}`
+            : '/api/admin/rooms/stats';
+          const roomStatsRes = await api.get(roomStatsEndpoint).catch(() => null);
+          if (roomStatsRes?.data?.success) {
+            const roomData = roomStatsRes.data.data;
+            const overall = roomData.overall || {};
+            setStats(prev => ({
+              ...prev,
+              rooms: {
+                ...prev.rooms,
+                total: overall.totalRooms ?? prev.rooms.total,
+                occupied: overall.filledBeds ?? prev.rooms.occupied,
+                available: overall.availableBeds ?? prev.rooms.available,
+                occupancyRate: overall.totalBeds > 0
+                  ? Math.round((overall.filledBeds / overall.totalBeds) * 100)
+                  : 0,
+                byHostel: roomData.byHostel || []
+              }
+            }));
+          }
+        }
+
+        if (canViewAttendance) {
+          const yesterdayDate = new Date(`${today}T00:00:00.000Z`);
+          yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+          const yesterday = yesterdayDate.toISOString().split('T')[0];
+          const academicYearParam = analyticsMode === 'ay'
+            ? `&academicYear=${encodeURIComponent(selectedAcademicYear)}`
+            : '';
+          const [todayAttendanceRes, yesterdayAttendanceRes] = await Promise.all([
+            api.get(`/api/attendance/date?date=${today}${academicYearParam}`).catch(() => null),
+            api.get(`/api/attendance/date?date=${yesterday}${academicYearParam}`).catch(() => null)
+          ]);
+
+          setStats(prev => ({
+            ...prev,
+            attendance: {
+              ...prev.attendance,
+              byCourseToday: todayAttendanceRes?.data?.success
+                ? summarizeAttendanceByCourse(todayAttendanceRes.data.data.attendance)
+                : prev.attendance.byCourseToday,
+              byCourseYesterday: yesterdayAttendanceRes?.data?.success
+                ? summarizeAttendanceByCourse(yesterdayAttendanceRes.data.data.attendance)
+                : prev.attendance.byCourseYesterday
+            }
           }));
         }
 
@@ -457,7 +532,7 @@ const DashboardHome = () => {
     };
 
     fetchDashboardData();
-  }, [analyticsMode, selectedAcademicYear]);
+  }, [analyticsMode, selectedAcademicYear, canViewRooms, canViewAttendance]);
 
   // Calculate trends
   const financialTrend = useMemo(() => {
@@ -738,119 +813,90 @@ const DashboardHome = () => {
                   ? 'lg:col-span-2'
                   : ''
                 }`}>
-                {/* Students & Attendance */}
                 {(canViewStudents || canViewAttendance) && (
-                  <div
-                    className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6"
+                  <ModuleSection
+                    title="Students At a Glance"
+                    icon={AcademicCapIcon}
+                    iconColor="bg-blue-500"
                   >
-                    {canViewStudents && (
-                      <ModuleSection
-                        title="Student Management"
-                        icon={AcademicCapIcon}
-                        iconColor="bg-blue-500"
-                      >
-                        <div className="space-y-3 sm:space-y-4">
-                          <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
-                            <div className="bg-blue-50 rounded-lg p-3 sm:p-4">
-                              <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-900">{stats.students.active}</div>
-                              <div className="text-xs sm:text-sm text-blue-600 mt-1">Active Students</div>
+                    <div className="space-y-4">
+                      {canViewStudents && (
+                        <>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="rounded-lg bg-blue-50 p-3 text-center">
+                              <div className="text-lg font-bold text-blue-900">{stats.students.total}</div>
+                              <div className="text-xs text-blue-700">Total</div>
                             </div>
-                            {analyticsMode === 'live' ? (
-                              <div className="bg-green-50 rounded-lg p-3 sm:p-4">
-                                <div className="text-lg sm:text-xl lg:text-2xl font-bold text-green-900">{stats.students.newThisWeek}</div>
-                                <div className="text-xs sm:text-sm text-green-600 mt-1">New This Week</div>
-                              </div>
-                            ) : (
-                              <div className="bg-amber-50 rounded-lg p-3 sm:p-4">
-                                <div className="text-lg sm:text-xl lg:text-2xl font-bold text-amber-900">{stats.students.inactive || 0}</div>
-                                <div className="text-xs sm:text-sm text-amber-700 mt-1">Inactive Students</div>
-                              </div>
-                            )}
+                            <div className="rounded-lg bg-green-50 p-3 text-center">
+                              <div className="text-lg font-bold text-green-900">{stats.students.active}</div>
+                              <div className="text-xs text-green-700">Active</div>
+                            </div>
+                            <div className="rounded-lg bg-gray-100 p-3 text-center">
+                              <div className="text-lg font-bold text-gray-900">{stats.students.inactive}</div>
+                              <div className="text-xs text-gray-600">Inactive</div>
+                            </div>
                           </div>
-                          {stats.students.byCourse.length > 0 && (
-                            <div>
-                              <div className="text-xs sm:text-sm font-medium text-gray-700 mb-2">By Course</div>
-                              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-2.5">
-                                {stats.students.byCourse.map((course, idx) => {
-                                  const colors = [
-                                    { bg: 'bg-blue-50', text: 'text-blue-900' },
-                                    { bg: 'bg-green-50', text: 'text-green-900' },
-                                    { bg: 'bg-purple-50', text: 'text-purple-900' },
-                                    { bg: 'bg-orange-50', text: 'text-orange-900' }
-                                  ];
-                                  const color = colors[idx % colors.length];
-                                  return (
-                                    <div key={course.name} className={`text-center ${color.bg} rounded-lg p-2 sm:p-2.5`}>
-                                      <div className={`text-sm sm:text-base font-bold ${color.text}`}>{course.count}</div>
-                                      <div className="text-xs text-gray-600 mt-0.5 truncate" title={course.name}>{course.name}</div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          <button
-                            onClick={() => navigate('/admin/dashboard/students')}
-                            className="w-full py-2 text-xs sm:text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors active:bg-blue-100"
-                          >
-                            View All Students →
-                          </button>
-                        </div>
-                      </ModuleSection>
-                    )}
+                          <div className="overflow-x-auto rounded-lg border border-gray-200">
+                            <table className="min-w-full divide-y divide-gray-200 text-left">
+                              <thead className="bg-gray-50">
+                                <tr>
+                                  <th className="px-3 py-2 text-xs font-semibold uppercase text-gray-500">Course</th>
+                                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Admitted Count</th>
+                                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Today Attendance</th>
+                                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Yesterday Attendance</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 bg-white">
+                                {stats.students.byCourse.length > 0 ? stats.students.byCourse.map(course => (
+                                  (() => {
+                                    const courseKey = normalizeText(course.name);
+                                    const todayAttendance = stats.attendance.byCourseToday[courseKey];
+                                    const yesterdayAttendance = stats.attendance.byCourseYesterday[courseKey];
+                                    const renderAttendance = attendanceSummary => attendanceSummary ? (
+                                      <div>
+                                        <div className="text-sm font-semibold text-gray-900">
+                                          {attendanceSummary.fullyPresent} / {attendanceSummary.total}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {attendanceSummary.percentage}% · {attendanceSummary.partiallyPresent} partial
+                                        </div>
+                                      </div>
+                                    ) : <span className="text-sm text-gray-400">—</span>;
 
-                    {canViewAttendance && (
-                      <ModuleSection
-                        title="Attendance"
-                        icon={CalendarIcon}
-                        iconColor="bg-green-500"
-                      >
-                        <div className="space-y-3 sm:space-y-4">
-                          <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-lg p-3 sm:p-4 text-white">
-                            <div className="text-xl sm:text-2xl lg:text-3xl font-bold mb-1">{stats.attendance.today.percentage}%</div>
-                            <div className="text-xs sm:text-sm opacity-90">Today's Attendance Rate</div>
+                                    return (
+                                      <tr key={course.name} className="hover:bg-gray-50">
+                                        <td className="px-3 py-2.5 text-sm text-gray-800">{course.name}</td>
+                                        <td className="px-3 py-2.5 text-right text-sm font-semibold text-gray-900">{course.count}</td>
+                                        <td className="px-3 py-2.5 text-right">{renderAttendance(todayAttendance)}</td>
+                                        <td className="px-3 py-2.5 text-right">{renderAttendance(yesterdayAttendance)}</td>
+                                      </tr>
+                                    );
+                                  })()
+                                )) : (
+                                  <tr>
+                                    <td colSpan="4" className="px-3 py-6 text-center text-sm text-gray-500">No course totals available.</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
                           </div>
-                          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                            <div className="text-center">
-                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.fullyPresent}</div>
-                              <div className="text-xs text-gray-500 mt-0.5">Fully Present</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.partiallyPresent}</div>
-                              <div className="text-xs text-gray-500 mt-0.5">Partial</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-base sm:text-lg font-bold text-gray-900">{stats.attendance.today.absent}</div>
-                              <div className="text-xs text-gray-500 mt-0.5">Absent</div>
-                            </div>
+                        </>
+                      )}
+                      {canViewAttendance && (
+                        <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-sm font-medium text-green-900">Today's Attendance</span>
+                            <span className="text-lg font-bold text-green-800">{stats.attendance.today.percentage}%</span>
                           </div>
-                          <div className="border-t border-gray-200 pt-2.5 sm:pt-3">
-                            <div className="text-xs sm:text-sm font-medium text-gray-700 mb-2">Recent Session Presentees</div>
-                            <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
-                              <div className="text-center bg-blue-50 rounded-lg p-2 sm:p-2.5">
-                                <div className="text-sm sm:text-base font-bold text-blue-900">🌅 {stats.attendance.today.morningPresent}</div>
-                                <div className="text-xs text-gray-600 mt-0.5">Morning</div>
-                              </div>
-                              <div className="text-center bg-orange-50 rounded-lg p-2 sm:p-2.5">
-                                <div className="text-sm sm:text-base font-bold text-orange-900">🌆 {stats.attendance.today.eveningPresent}</div>
-                                <div className="text-xs text-gray-600 mt-0.5">Evening</div>
-                              </div>
-                              <div className="text-center bg-purple-50 rounded-lg p-2 sm:p-2.5">
-                                <div className="text-sm sm:text-base font-bold text-purple-900">🌙 {stats.attendance.today.nightPresent}</div>
-                                <div className="text-xs text-gray-600 mt-0.5">Night</div>
-                              </div>
-                            </div>
+                          <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs text-gray-600">
+                            <span>{stats.attendance.today.fullyPresent} present</span>
+                            <span>{stats.attendance.today.partiallyPresent} partial</span>
+                            <span>{stats.attendance.today.absent} absent</span>
                           </div>
-                          <button
-                            onClick={() => navigate('/admin/dashboard/attendance')}
-                            className="w-full py-2 text-xs sm:text-sm font-medium text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors active:bg-green-100"
-                          >
-                            View Attendance →
-                          </button>
                         </div>
-                      </ModuleSection>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  </ModuleSection>
                 )}
 
                 {/* Financial Overview */}
@@ -901,16 +947,16 @@ const DashboardHome = () => {
                         <div className="space-y-3 sm:space-y-4">
                           <div className="grid grid-cols-3 gap-2">
                             <div className="text-center">
-                              <div className="text-lg sm:text-xl font-bold text-orange-900">{stats.complaints.active}</div>
-                              <div className="text-xs text-gray-500">Active</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-lg sm:text-xl font-bold text-green-900">{stats.complaints.resolved}</div>
-                              <div className="text-xs text-gray-500">Resolved</div>
+                              <div className="text-lg sm:text-xl font-bold text-orange-900">{stats.complaints.pending}</div>
+                              <div className="text-xs text-gray-500">Pending Requests</div>
                             </div>
                             <div className="text-center">
                               <div className="text-lg sm:text-xl font-bold text-blue-900">{stats.complaints.inProgress}</div>
                               <div className="text-xs text-gray-500">In Progress</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-lg sm:text-xl font-bold text-green-900">{stats.complaints.resolved}</div>
+                              <div className="text-xs text-gray-500">Resolved</div>
                             </div>
                           </div>
                           {stats.complaints.avgResolutionTime > 0 && (
@@ -923,7 +969,7 @@ const DashboardHome = () => {
                             onClick={() => navigate('/admin/dashboard/complaints')}
                             className="w-full py-2 text-xs sm:text-sm font-medium text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg transition-colors active:bg-orange-100"
                           >
-                            Manage Complaints →
+                            View Pending Complaints →
                           </button>
                         </div>
                       </ModuleSection>
@@ -938,7 +984,7 @@ const DashboardHome = () => {
                         <div className="space-y-3 sm:space-y-4">
                           <div className="bg-indigo-50 rounded-lg p-3 sm:p-4">
                             <div className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-900 mb-1">{stats.leaves.pending}</div>
-                            <div className="text-xs sm:text-sm text-indigo-600">Pending Approvals</div>
+                            <div className="text-xs sm:text-sm text-indigo-600">Pending Requests</div>
                           </div>
                           <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                             <div className="text-center">
@@ -954,7 +1000,7 @@ const DashboardHome = () => {
                             onClick={() => navigate('/admin/dashboard/leave')}
                             className="w-full py-2 text-xs sm:text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors active:bg-indigo-100"
                           >
-                            Manage Leaves →
+                            View Pending Requests →
                           </button>
                         </div>
                       </ModuleSection>
@@ -1043,34 +1089,64 @@ const DashboardHome = () => {
                   </ModuleSection>
                 )}
 
-                {/* Rooms Overview */}
+                {/* Occupancy Overview */}
                 {canViewRooms && (
                   <ModuleSection
-                    title="Room Management"
+                    title="Occupancy"
                     icon={BuildingOfficeIcon}
                     iconColor="bg-cyan-500"
                   >
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="bg-gradient-to-r from-cyan-500 to-cyan-600 rounded-lg p-3 sm:p-4 text-white">
-                        <div className="text-xl sm:text-2xl lg:text-3xl font-bold mb-1">{stats.rooms.occupancyRate}%</div>
-                        <div className="text-xs sm:text-sm opacity-90">Bed Occupancy Rate</div>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-gray-500">{analyticsMode === 'ay' ? `Academic year ${selectedAcademicYear}` : 'Live occupancy'}</p>
+                        <p className="text-xs font-semibold text-gray-700">{stats.rooms.occupancyRate}% occupied overall</p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                        <div className="text-center">
-                          <div className="text-base sm:text-lg font-bold text-gray-900">{stats.rooms.occupied}</div>
-                          <div className="text-xs text-gray-500 mt-0.5">Filled Beds</div>
+                      {stats.rooms.byHostel?.length ? (
+                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                          <table className="min-w-full divide-y divide-gray-200 text-left">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase text-gray-500">S.no</th>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase text-gray-500">Hostel Name</th>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase text-gray-500">Category</th>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase text-gray-500">Filled / Total</th>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase text-red-600">Vacant</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                              {stats.rooms.byHostel
+                                .flatMap(hostel => (hostel.categories || []).map(category => ({ hostel, category })))
+                                .map(({ hostel, category }, index) => {
+                                  const totalBeds = category.totalBeds || 0;
+                                  const filledBeds = category.filledBeds || 0;
+                                  const vacantBeds = category.availableBeds ?? Math.max(0, totalBeds - filledBeds);
+                                  const filledPercentage = totalBeds > 0 ? Math.round((filledBeds / totalBeds) * 100) : 0;
+                                  const vacantPercentage = totalBeds > 0 ? Math.round((vacantBeds / totalBeds) * 100) : 0;
+
+                                  return (
+                                    <tr key={`${hostel.hostelId}-${category.categoryId}`} className="hover:bg-gray-50">
+                                      <td className="px-3 py-2.5 text-sm text-gray-500">{index + 1}</td>
+                                      <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{hostel.hostelName}</td>
+                                      <td className="px-3 py-2.5 text-sm text-gray-700">{category.categoryName}</td>
+                                      <td className="px-3 py-2.5 text-sm text-gray-800">
+                                        <div className="font-semibold">{filledBeds} / {totalBeds}</div>
+                                        <div className="text-xs text-gray-500">{filledPercentage}% occupied</div>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm text-red-600">
+                                        <div className="font-semibold">{vacantBeds}</div>
+                                        <div className="text-xs">{vacantPercentage}% vacant</div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                            </tbody>
+                          </table>
                         </div>
-                        <div className="text-center">
-                          <div className="text-base sm:text-lg font-bold text-gray-900">{stats.rooms.available}</div>
-                          <div className="text-xs text-gray-500 mt-0.5">Available Beds</div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">
+                          No hostel occupancy data available.
                         </div>
-                      </div>
-                      <button
-                        onClick={() => navigate('/admin/dashboard/rooms/management')}
-                        className="w-full py-2 text-xs sm:text-sm font-medium text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50 rounded-lg transition-colors active:bg-cyan-100"
-                      >
-                        View Rooms →
-                      </button>
+                      )}
                     </div>
                   </ModuleSection>
                 )}

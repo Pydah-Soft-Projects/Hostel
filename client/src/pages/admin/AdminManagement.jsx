@@ -40,6 +40,45 @@ const PERMISSIONS = [
   { id: 'feature_controls', label: 'Feature Controls' }
 ];
 
+const STAFF_GUEST_ACCESS_TABS = [
+  { id: 'management', label: 'Management' },
+  { id: 'attendance', label: 'Attendance' },
+  { id: 'settings', label: 'Settings' }
+];
+
+const StaffGuestsAccessSelector = ({ accessLevels, onAccessLevelChange }) => (
+  <div className="ml-4 sm:ml-6 mt-2 p-2 sm:p-3 bg-blue-50 rounded-lg space-y-2">
+    <div className="text-xs sm:text-sm font-medium text-blue-700">Staff/Guests Tab Access</div>
+    {STAFF_GUEST_ACCESS_TABS.map(tab => {
+      const accessKey = `staff_guests_management:${tab.id}`;
+      const accessLevel = accessLevels[accessKey] || accessLevels.staff_guests_management || 'view';
+      return (
+        <div key={tab.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-blue-100 pt-2 first:border-0 first:pt-0">
+          <span className="text-xs font-medium text-blue-800">{tab.label}</span>
+          <div className="flex gap-3">
+            {[
+              { value: 'view', label: 'Read' },
+              { value: 'full', label: 'Write' }
+            ].map(option => (
+              <label key={option.value} className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name={`access_${accessKey}`}
+                  value={option.value}
+                  checked={accessLevel === option.value}
+                  onChange={() => onAccessLevelChange(accessKey, option.value)}
+                  className="w-3 h-3 text-blue-600 border-gray-300 focus:ring-blue-500"
+                />
+                <span className="text-xs text-blue-700">{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
+
 // Course assignment permissions that need course selection
 const COURSE_ASSIGNMENT_PERMISSIONS = ['leave_management', 'student_management', 'attendance_management'];
 
@@ -153,6 +192,7 @@ const AdminManagement = () => {
     principalEmail: '', // Email for principal (for leave notifications)
     principalCourses: [], // New field for principal multi-course selection
     assignedCollegeIds: [], // New field for principal colleges (multi-select)
+    assignedCollegeScopes: [],
     assignedLevels: [], // New field for principal levels (Diploma, UG, PG)
     employeeId: '',
     hrmsUserId: '',
@@ -330,6 +370,11 @@ const AdminManagement = () => {
         } else {
           // Remove access level when permission is unchecked
           delete newAccessLevels[value];
+          if (value === 'staff_guests_management') {
+            Object.keys(newAccessLevels)
+              .filter(key => key.startsWith('staff_guests_management:'))
+              .forEach(key => delete newAccessLevels[key]);
+          }
         }
 
         return {
@@ -356,14 +401,39 @@ const AdminManagement = () => {
     }));
   };
 
-  // Handle level selection for principal
-  const handleLevelSelection = (level, checked) => {
+  const handlePrincipalCollegeSelection = (collegeId, checked) => {
     setFormData(prev => ({
       ...prev,
-      assignedLevels: checked
-        ? [...prev.assignedLevels, level]
-        : prev.assignedLevels.filter(l => l !== level)
+      assignedCollegeScopes: checked
+        ? [...prev.assignedCollegeScopes, { collegeId: Number(collegeId), levels: [] }]
+        : prev.assignedCollegeScopes.filter(scope => Number(scope.collegeId) !== Number(collegeId)),
+      assignedCollegeIds: checked
+        ? [...prev.assignedCollegeIds, Number(collegeId)]
+        : prev.assignedCollegeIds.filter(id => Number(id) !== Number(collegeId)),
+      assignedLevels: [...new Set((checked
+        ? prev.assignedCollegeScopes
+        : prev.assignedCollegeScopes.filter(scope => Number(scope.collegeId) !== Number(collegeId)))
+        .flatMap(scope => scope.levels))]
     }));
+  };
+
+  const handlePrincipalCollegeLevelSelection = (collegeId, level, checked) => {
+    setFormData(prev => {
+      const assignedCollegeScopes = prev.assignedCollegeScopes.map(scope => {
+        if (Number(scope.collegeId) !== Number(collegeId)) return scope;
+        return {
+          ...scope,
+          levels: checked
+            ? [...new Set([...scope.levels, level])]
+            : scope.levels.filter(item => item !== level)
+        };
+      });
+      return {
+        ...prev,
+        assignedCollegeScopes,
+        assignedLevels: [...new Set(assignedCollegeScopes.flatMap(scope => scope.levels))]
+      };
+    });
   };
 
   // Handle role form changes
@@ -382,6 +452,11 @@ const AdminManagement = () => {
           newAccessLevels[value] = 'view';
         } else {
           delete newAccessLevels[value];
+          if (value === 'staff_guests_management') {
+            Object.keys(newAccessLevels)
+              .filter(key => key.startsWith('staff_guests_management:'))
+              .forEach(key => delete newAccessLevels[key]);
+          }
         }
 
         return {
@@ -482,8 +557,9 @@ const AdminManagement = () => {
       } else if (activeTab === 'principals') {
         endpoint = '/api/admin-management/principals';
         requestData = {
-          assignedCollegeIds: formData.assignedCollegeIds,
-          assignedLevels: formData.assignedLevels,
+          assignedCollegeIds: formData.assignedCollegeScopes.map(scope => scope.collegeId),
+          assignedCollegeScopes: formData.assignedCollegeScopes,
+          assignedLevels: [...new Set(formData.assignedCollegeScopes.flatMap(scope => scope.levels))],
           email: formData.principalEmail,
           ...hrmsFields
         };
@@ -512,6 +588,7 @@ const AdminManagement = () => {
           phoneNumber: '',
           principalEmail: '',
           assignedCollegeIds: [],
+          assignedCollegeScopes: [],
           assignedLevels: [],
           employeeId: '',
           hrmsUserId: '',
@@ -560,12 +637,9 @@ const AdminManagement = () => {
         }
       } else if (activeTab === 'principals') {
         endpoint = `/api/admin-management/principals/${selectedAdmin._id}`;
-        if (formData.assignedCollegeIds && formData.assignedCollegeIds.length > 0) {
-          updateData.assignedCollegeIds = formData.assignedCollegeIds;
-        }
-        if (formData.assignedLevels && formData.assignedLevels.length > 0) {
-          updateData.assignedLevels = formData.assignedLevels;
-        }
+        updateData.assignedCollegeIds = formData.assignedCollegeScopes.map(scope => scope.collegeId);
+        updateData.assignedCollegeScopes = formData.assignedCollegeScopes;
+        updateData.assignedLevels = [...new Set(formData.assignedCollegeScopes.flatMap(scope => scope.levels))];
         // Always include email for principals (can be empty to clear it)
         updateData.email = formData.principalEmail;
       }
@@ -618,6 +692,7 @@ const AdminManagement = () => {
           principalEmail: '',
           principalCourses: [],
           assignedCollegeIds: [],
+          assignedCollegeScopes: [],
           assignedLevels: [],
           employeeId: '',
           hrmsUserId: '',
@@ -679,6 +754,11 @@ const AdminManagement = () => {
 
     console.log('🔧 Editing admin with leave management courses:', leaveManagementCourses);
 
+    const assignedCollegeScopes = admin.assignedCollegeScopes?.length
+      ? admin.assignedCollegeScopes.map(scope => ({ collegeId: Number(scope.collegeId), levels: scope.levels || [] }))
+      : (admin.assignedCollegeIds?.length ? admin.assignedCollegeIds : admin.assignedCollegeId ? [admin.assignedCollegeId] : [])
+        .map(collegeId => ({ collegeId: Number(collegeId), levels: admin.assignedLevels || [] }));
+
     setFormData({
       username: admin.username,
       password: '',
@@ -696,10 +776,9 @@ const AdminManagement = () => {
       customRoleId: admin.customRoleId || '',
       principalEmail: admin.email || '', // Load principal's email
       principalCourses: admin.assignedCourses || (admin.course ? [admin.course] : []), // Load principal's courses
-      assignedCollegeIds: admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0
-        ? admin.assignedCollegeIds
-        : (admin.assignedCollegeId ? [admin.assignedCollegeId] : []), // Load principal's colleges (handle legacy single ID)
-      assignedLevels: admin.assignedLevels || [], // Load principal's levels
+      assignedCollegeIds: assignedCollegeScopes.map(scope => scope.collegeId),
+      assignedCollegeScopes,
+      assignedLevels: [...new Set(assignedCollegeScopes.flatMap(scope => scope.levels))],
       employeeId: admin.employeeId || '',
       hrmsUserId: admin.hrmsUserId || '',
       hrmsEmployeeRef: admin.hrmsEmployeeRef || '',
@@ -726,21 +805,17 @@ const AdminManagement = () => {
     }
 
     setFormData(prev => {
-      const currentIds = prev.assignedCollegeIds || [];
-      const currentLevels = prev.assignedLevels || [];
-
-      // Add college if not already added
-      const newIds = currentIds.includes(Number(selectedCollegeToAdd))
-        ? currentIds
-        : [...currentIds, Number(selectedCollegeToAdd)];
-
-      // Merge levels (Union)
-      const newLevels = [...new Set([...currentLevels, ...selectedLevelsToAdd])];
+      const collegeId = Number(selectedCollegeToAdd);
+      const scopes = prev.assignedCollegeScopes || [];
+      const newScopes = scopes.some(scope => Number(scope.collegeId) === collegeId)
+        ? scopes.map(scope => Number(scope.collegeId) === collegeId ? { ...scope, levels: selectedLevelsToAdd } : scope)
+        : [...scopes, { collegeId, levels: selectedLevelsToAdd }];
 
       return {
         ...prev,
-        assignedCollegeIds: newIds,
-        assignedLevels: newLevels
+        assignedCollegeIds: newScopes.map(scope => scope.collegeId),
+        assignedCollegeScopes: newScopes,
+        assignedLevels: [...new Set(newScopes.flatMap(scope => scope.levels))]
       };
     });
 
@@ -813,6 +888,7 @@ const AdminManagement = () => {
       principalEmail: '',
       principalCourses: [],
       assignedCollegeIds: [],
+      assignedCollegeScopes: [],
       assignedLevels: [],
       employeeId: '',
       hrmsUserId: '',
@@ -1261,13 +1337,24 @@ const AdminManagement = () => {
                                 </div>
 
                                 {/* Levels */}
-                                <div className="flex flex-wrap gap-1 ml-6">
-                                  {admin.assignedLevels && admin.assignedLevels.map(level => (
-                                    <span key={level} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] uppercase border border-gray-200">
-                                      {level}
-                                    </span>
-                                  ))}
-                                </div>
+                                {admin.assignedCollegeScopes?.length ? (
+                                  <div className="ml-6 space-y-1">
+                                    {admin.assignedCollegeScopes.map(scope => (
+                                      <div key={scope.collegeId} className="flex flex-wrap items-center gap-1">
+                                        <span className="text-[10px] text-gray-500">{colleges.find(college => Number(college.id) === Number(scope.collegeId))?.name || scope.collegeId}:</span>
+                                        {scope.levels.map(level => (
+                                          <span key={level} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] uppercase border border-gray-200">{level}</span>
+                                        ))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1 ml-6">
+                                    {admin.assignedLevels?.map(level => (
+                                      <span key={level} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] uppercase border border-gray-200">{level}</span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ) : admin.assignedCollegeId ? (
                               /* Fallback for legacy single ID */
@@ -1302,12 +1389,13 @@ const AdminManagement = () => {
 
                                   if (targetCollegeIds.length > 0) {
                                     // Filter courses matching ANY of the college IDs AND matching the levels
-                                    const filteredCourses = courses.filter(course =>
-                                      course.college &&
-                                      targetCollegeIds.includes(course.college.id) &&
-                                      admin.assignedLevels &&
-                                      admin.assignedLevels.map(l => l.toLowerCase()).includes(course.level?.toLowerCase())
-                                    );
+                                    const filteredCourses = courses.filter(course => {
+                                      const scope = admin.assignedCollegeScopes?.find(item => Number(item.collegeId) === Number(course.college?.id));
+                                      const levels = scope?.levels || admin.assignedLevels || [];
+                                      return course.college &&
+                                        targetCollegeIds.includes(course.college.id) &&
+                                        levels.map(level => level.toLowerCase()).includes(course.level?.toLowerCase());
+                                    });
 
                                     if (filteredCourses.length > 0) {
                                       // Limit display to 5 courses + "x more"
@@ -1627,9 +1715,8 @@ const AdminManagement = () => {
                                 <div className="text-xs font-semibold text-gray-800 mb-1">{collegeName}</div>
                                 <div className="flex flex-wrap gap-2">
                                   {collegeCourses.filter(c => {
-                                    // Filter by Level
-                                    if (formData.assignedLevels.length === 0) return true;
-                                    return formData.assignedLevels.some(l => c.level && c.level.toLowerCase() === l.toLowerCase());
+                                    const scope = formData.assignedCollegeScopes.find(item => Number(item.collegeId) === Number(c.college.id));
+                                    return scope?.levels.some(level => c.level && c.level.toLowerCase() === level.toLowerCase());
                                   }).map(course => (
                                     <span key={course._id} className="inline-flex items-center px-2 py-1 bg-white border border-indigo-100 text-indigo-700 rounded-md text-xs font-medium shadow-sm gap-1">
                                       {course.name}
@@ -1640,7 +1727,10 @@ const AdminManagement = () => {
                                       )}
                                     </span>
                                   ))}
-                                  {collegeCourses.filter(c => formData.assignedLevels.some(l => c.level && c.level.toLowerCase() === l.toLowerCase())).length === 0 && (
+                                  {collegeCourses.filter(c => {
+                                    const scope = formData.assignedCollegeScopes.find(item => Number(item.collegeId) === Number(c.college.id));
+                                    return scope?.levels.some(level => c.level && c.level.toLowerCase() === level.toLowerCase());
+                                  }).length === 0 && (
                                     <span className="text-xs text-gray-400 italic">No courses match selected levels</span>
                                   )}
                                 </div>
@@ -1775,7 +1865,7 @@ const AdminManagement = () => {
                                     <div className="text-sm font-medium text-gray-900">{college?.name || 'Unknown College'}</div>
                                     <div className="flex gap-1 mt-1">
                                       {/* Display ALL assigned levels for now, as schema is global */}
-                                      {formData.assignedLevels.map(level => (
+                                      {(formData.assignedCollegeScopes.find(scope => Number(scope.collegeId) === Number(id))?.levels || []).map(level => (
                                         <span key={level} className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-100 uppercase font-medium">
                                           {level}
                                         </span>
@@ -1788,7 +1878,11 @@ const AdminManagement = () => {
                                       // Remove College
                                       setFormData(prev => ({
                                         ...prev,
-                                        assignedCollegeIds: prev.assignedCollegeIds.filter(cid => cid !== id)
+                                        assignedCollegeIds: prev.assignedCollegeIds.filter(cid => Number(cid) !== Number(id)),
+                                        assignedCollegeScopes: prev.assignedCollegeScopes.filter(scope => Number(scope.collegeId) !== Number(id)),
+                                        assignedLevels: [...new Set(prev.assignedCollegeScopes
+                                          .filter(scope => Number(scope.collegeId) !== Number(id))
+                                          .flatMap(scope => scope.levels))]
                                       }));
                                     }}
                                     className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -2028,6 +2122,12 @@ const AdminManagement = () => {
 
                                 {/* Access Level Selector for each permission */}
                                 {formData.permissions.includes(permission.id) && (
+                                  permission.id === 'staff_guests_management' ? (
+                                    <StaffGuestsAccessSelector
+                                      accessLevels={formData.permissionAccessLevels}
+                                      onAccessLevelChange={handleAccessLevelChange}
+                                    />
+                                  ) : (
                                   <div className="mt-2 p-2 bg-blue-50 rounded-lg">
                                     <div className="text-xs font-medium text-blue-700 mb-1">
                                       Access Level for {permission.label}
@@ -2057,6 +2157,7 @@ const AdminManagement = () => {
                                       </label>
                                     </div>
                                   </div>
+                                  )
                                 )}
 
                                 {/* Course selection for Leave Management */}
@@ -2316,7 +2417,14 @@ const AdminManagement = () => {
                                         type="button"
                                         onClick={() => {
                                           const newIds = formData.assignedCollegeIds.filter(cid => cid !== id);
-                                          setFormData(prev => ({ ...prev, assignedCollegeIds: newIds }));
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            assignedCollegeIds: newIds,
+                                            assignedCollegeScopes: prev.assignedCollegeScopes.filter(scope => Number(scope.collegeId) !== Number(id)),
+                                            assignedLevels: [...new Set(prev.assignedCollegeScopes
+                                              .filter(scope => Number(scope.collegeId) !== Number(id))
+                                              .flatMap(scope => scope.levels))]
+                                          }));
                                         }}
                                         className="ml-1 text-blue-400 hover:text-blue-600 focus:outline-none"
                                       >
@@ -2335,15 +2443,7 @@ const AdminManagement = () => {
                                     type="checkbox"
                                     checked={formData.assignedCollegeIds?.includes(college.id) || false}
                                     onChange={(e) => {
-                                      const checked = e.target.checked;
-                                      setFormData(prev => {
-                                        const currentIds = prev.assignedCollegeIds || [];
-                                        if (checked) {
-                                          return { ...prev, assignedCollegeIds: [...currentIds, college.id] };
-                                        } else {
-                                          return { ...prev, assignedCollegeIds: currentIds.filter(id => id !== college.id) };
-                                        }
-                                      });
+                                      handlePrincipalCollegeSelection(college.id, e.target.checked);
                                     }}
                                     className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                                   />
@@ -2362,31 +2462,36 @@ const AdminManagement = () => {
                             )}
                           </div>
 
-                          {/* Level Selection */}
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Select Levels <span className="text-red-500">*</span>
-                            </label>
-                            <div className="flex gap-4 p-2 border border-gray-300 rounded-lg bg-white">
-                              {['diploma', 'ug', 'pg'].map(level => (
-                                <label key={level} className="flex items-center gap-2 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={formData.assignedLevels.includes(level)}
-                                    onChange={(e) => handleLevelSelection(level, e.target.checked)}
-                                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                  />
-                                  <span className="text-sm text-gray-700">{level.toUpperCase()}</span>
-                                </label>
-                              ))}
-                            </div>
-                            {formData.assignedLevels.length === 0 && (
-                              <p className="text-xs text-red-500 mt-1">Please select at least one level</p>
-                            )}
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-gray-700">Levels by College</label>
+                            {formData.assignedCollegeScopes.map(scope => {
+                              const college = colleges.find(item => Number(item.id) === Number(scope.collegeId));
+                              return (
+                                <div key={scope.collegeId} className="p-3 border border-gray-200 rounded-lg bg-white">
+                                  <div className="text-sm font-medium text-gray-800 mb-2">{college?.name || scope.collegeId}</div>
+                                  <div className="flex flex-wrap gap-4">
+                                    {['diploma', 'ug', 'pg'].map(level => (
+                                      <label key={level} className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={scope.levels.includes(level)}
+                                          onChange={event => handlePrincipalCollegeLevelSelection(scope.collegeId, level, event.target.checked)}
+                                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        />
+                                        <span className="text-sm text-gray-700">{level.toUpperCase()}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                  {scope.levels.length === 0 && (
+                                    <p className="text-xs text-red-500 mt-1">Select at least one level for this college</p>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
 
                           {/* Course Preview Section */}
-                          {(formData.assignedCollegeIds?.length > 0 || formData.assignedLevels.length > 0) && (
+                          {formData.assignedCollegeScopes.length > 0 && (
                             <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                               <label className="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">
                                 Assigned Courses Preview
@@ -2404,9 +2509,8 @@ const AdminManagement = () => {
 
                                     const collegeMatch = formData.assignedCollegeIds.includes(course.college.id);
 
-                                    // If levels are selected, filter by level too
-                                    const levelMatch = formData.assignedLevels.length === 0 ||
-                                      (course.level && formData.assignedLevels.some(l => l.toLowerCase() === course.level.toLowerCase()));
+                                    const scope = formData.assignedCollegeScopes.find(item => Number(item.collegeId) === Number(course.college.id));
+                                    const levelMatch = scope?.levels.some(level => course.level && level.toLowerCase() === course.level.toLowerCase());
 
                                     return collegeMatch && levelMatch;
                                   });
@@ -2562,13 +2666,20 @@ const AdminManagement = () => {
 
                         {/* Access Level Selector for each permission */}
                         {roleFormData.permissions.includes(permission.id) && (
-                          <AccessLevelSelector
-                            permissionId={permission.id}
-                            permissionLabel={permission.label}
-                            accessLevel={roleFormData.permissionAccessLevels[permission.id] || 'view'}
-                            onAccessLevelChange={handleRoleAccessLevelChange}
-                            disabled={false}
-                          />
+                          permission.id === 'staff_guests_management' ? (
+                            <StaffGuestsAccessSelector
+                              accessLevels={roleFormData.permissionAccessLevels}
+                              onAccessLevelChange={handleRoleAccessLevelChange}
+                            />
+                          ) : (
+                            <AccessLevelSelector
+                              permissionId={permission.id}
+                              permissionLabel={permission.label}
+                              accessLevel={roleFormData.permissionAccessLevels[permission.id] || 'view'}
+                              onAccessLevelChange={handleRoleAccessLevelChange}
+                              disabled={false}
+                            />
+                          )
                         )}
 
                         {/* Course selection for permissions that need courses */}

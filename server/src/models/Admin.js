@@ -85,6 +85,14 @@ const adminSchema = new mongoose.Schema({
     type: Number,
     required: false
   }],
+  assignedCollegeScopes: [{
+    collegeId: { type: Number, required: true },
+    levels: [{
+      type: String,
+      enum: ['diploma', 'ug', 'pg'],
+      trim: true
+    }]
+  }],
   assignedLevels: [{
     type: String,
     enum: ['diploma', 'ug', 'pg'],

@@ -16,6 +16,30 @@ import {
 } from '@heroicons/react/24/outline';
 import SEO from '../../components/SEO';
 
+const getTodayDateInput = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+const formatDateIndia = (value) => value
+  ? new Date(value).toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })
+  : '—';
+
+const formatDateTimeIndia = (value) => value
+  ? new Date(value).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+  : '—';
+
+const getDefaultApprovalDate = () => getTodayDateInput();
+
 const LeaveManagement = () => {
   const [leaves, setLeaves] = useState([]);
   const [bulkOutings, setBulkOutings] = useState([]);
@@ -26,7 +50,7 @@ const LeaveManagement = () => {
   const [otp, setOtp] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('leaves'); // 'leaves' or 'bulk-outings'
+  const [activeTab, setActiveTab] = useState('leaves');
   const [filters, setFilters] = useState({
     status: 'Pending OTP Verification',
     applicationType: '',
@@ -34,6 +58,9 @@ const LeaveManagement = () => {
     fromDate: '',
     toDate: ''
   });
+  const [approvalDate, setApprovalDate] = useState(getDefaultApprovalDate);
+  const [approvalSummary, setApprovalSummary] = useState([]);
+  const [approvalSummaryLoading, setApprovalSummaryLoading] = useState(false);
 
   // Debounce filters to reduce API calls
   const debouncedFilters = useDebounce(filters, 500);
@@ -80,11 +107,17 @@ const LeaveManagement = () => {
   useEffect(() => {
     if (activeTab === 'leaves') {
       fetchLeaves();
-    } else {
+    } else if (activeTab === 'bulk-outings') {
       fetchBulkOutings();
     }
     fetchSMSBalance();
   }, [debouncedFilters, activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'approval-abstract') {
+      fetchApprovalAbstract();
+    }
+  }, [activeTab, approvalDate]);
 
   const fetchSMSBalance = async () => {
     setSmsLoading(true);
@@ -142,6 +175,21 @@ const LeaveManagement = () => {
       toast.error('Failed to fetch bulk outing requests');
     } finally {
       setBulkOutingsLoading(false);
+    }
+  };
+
+  const fetchApprovalAbstract = async () => {
+    setApprovalSummaryLoading(true);
+    try {
+      const response = await api.get('/api/admin/leave/approval-abstract', { params: { date: approvalDate } });
+      if (response.data.success) {
+        setApprovalSummary(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching leave approval abstract:', error);
+      toast.error(error.response?.data?.message || 'Failed to fetch approval abstract');
+    } finally {
+      setApprovalSummaryLoading(false);
     }
   };
 
@@ -287,14 +335,14 @@ const LeaveManagement = () => {
   const formatDisplayDate = (leave) => {
     if (leave.applicationType === 'Leave') {
       return {
-        start: new Date(leave.startDate).toLocaleDateString(),
-        end: new Date(leave.endDate).toLocaleDateString(),
+        start: formatDateIndia(leave.startDate),
+        end: formatDateIndia(leave.endDate),
         duration: `${leave.numberOfDays} day${leave.numberOfDays > 1 ? 's' : ''}`,
-        gatePass: new Date(leave.gatePassDateTime).toLocaleString()
+        gatePass: formatDateTimeIndia(leave.gatePassDateTime)
       };
     } else if (leave.applicationType === 'Permission') {
       return {
-        date: new Date(leave.permissionDate).toLocaleDateString(),
+        date: formatDateIndia(leave.permissionDate),
         time: `${leave.outTime} - ${leave.inTime}`,
         duration: '1 day'
       };
@@ -382,6 +430,7 @@ const LeaveManagement = () => {
                   <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">From:</label>
                   <input
                     type="date"
+                    lang="en-IN"
                     value={filters.fromDate}
                     onChange={e => setFilters(f => ({ ...f, fromDate: e.target.value, page: 1 }))}
                     className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
@@ -391,6 +440,7 @@ const LeaveManagement = () => {
                   <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">To:</label>
                   <input
                     type="date"
+                    lang="en-IN"
                     value={filters.toDate}
                     onChange={e => setFilters(f => ({ ...f, toDate: e.target.value, page: 1 }))}
                     className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
@@ -466,6 +516,15 @@ const LeaveManagement = () => {
             <span className="hidden sm:inline">Bulk Outing Requests</span>
             <span className="sm:hidden">Bulk Outings</span>
           </button>
+          <button
+            onClick={() => setActiveTab('approval-abstract')}
+            className={`px-2 sm:px-4 py-2 font-medium text-xs sm:text-sm border-b-2 transition-colors ${activeTab === 'approval-abstract'
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+          >
+            Approval Abstract
+          </button>
         </div>
 
         {/* Content based on active tab */}
@@ -503,7 +562,7 @@ const LeaveManagement = () => {
                               {leave.applicationType}
                             </span>
                             <span className="text-xs sm:text-sm text-gray-500">
-                              {new Date(leave.createdAt).toLocaleDateString()}
+                              {formatDateIndia(leave.createdAt)}
                             </span>
                           </div>
 
@@ -638,7 +697,7 @@ const LeaveManagement = () => {
               </div>
             )}
           </div>
-        ) : (
+        ) : activeTab === 'bulk-outings' ? (
           /* Bulk Outing List */
           <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
             {bulkOutingsLoading ? (
@@ -669,7 +728,7 @@ const LeaveManagement = () => {
                             Bulk Outing
                           </span>
                           <span className="text-xs sm:text-sm text-gray-500">
-                            {new Date(outing.createdAt).toLocaleDateString()}
+                            {formatDateIndia(outing.createdAt)}
                           </span>
                         </div>
 
@@ -691,7 +750,7 @@ const LeaveManagement = () => {
                         <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 mb-2">
                           <div className="flex items-center gap-1">
                             <CalendarIcon className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span>Date: {new Date(outing.outingDate).toLocaleDateString()}</span>
+                            <span>Date: {formatDateIndia(outing.outingDate)}</span>
                           </div>
                         </div>
 
@@ -807,6 +866,96 @@ const LeaveManagement = () => {
                 ))}
               </div>
             )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 p-4 sm:p-6 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Daily Request Abstract</h2>
+                <p className="mt-1 text-sm text-gray-500">Requests submitted and processed on {formatDateIndia(approvalDate)} (IST).</p>
+              </div>
+              <label className="block w-full text-xs font-medium text-gray-600 sm:w-56">
+                Approval Day <span className="text-gray-400">(DD/MM/YYYY)</span>
+                <input
+                  type="date"
+                  lang="en-IN"
+                  value={approvalDate}
+                  onChange={event => setApprovalDate(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+            </div>
+
+            <div className="p-4 sm:p-6">
+              {approvalSummaryLoading ? (
+                <div className="py-12 text-center text-sm text-gray-500">Loading approval summary…</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+                    <div className="rounded-lg bg-blue-50 p-3 text-center">
+                      <div className="text-xl font-bold text-blue-900">{approvalSummary.totals?.requests || 0}</div>
+                      <div className="text-xs text-blue-700">Total Requests</div>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 p-3 text-center">
+                      <div className="text-xl font-bold text-amber-900">{approvalSummary.totals?.pending || 0}</div>
+                      <div className="text-xs text-amber-700">Pending</div>
+                    </div>
+                    <div className="rounded-lg bg-green-50 p-3 text-center">
+                      <div className="text-xl font-bold text-green-900">{approvalSummary.totals?.approved || 0}</div>
+                      <div className="text-xs text-green-700">Approved</div>
+                    </div>
+                    <div className="rounded-lg bg-red-50 p-3 text-center">
+                      <div className="text-xl font-bold text-red-900">{approvalSummary.totals?.rejected || 0}</div>
+                      <div className="text-xs text-red-700">Rejected</div>
+                    </div>
+                    <div className="rounded-lg bg-gray-100 p-3 text-center">
+                      <div className="text-xl font-bold text-gray-900">{approvalSummary.totals?.processed || 0}</div>
+                      <div className="text-xs text-gray-600">Total Processed</div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="min-w-[720px] w-full divide-y divide-gray-200 text-left">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2.5 text-xs font-semibold uppercase text-gray-500">Request Type</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Total Requests</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Pending</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Processed</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Approved</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Rejected</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {(approvalSummary.byType || []).map(item => (
+                          <tr key={item.applicationType} className="hover:bg-gray-50">
+                            <td className="px-3 py-3 text-sm font-medium text-gray-900">{item.applicationType}</td>
+                            <td className="px-3 py-3 text-right text-sm text-gray-800">{item.requests}</td>
+                            <td className="px-3 py-3 text-right text-sm text-amber-700">{item.pending}</td>
+                            <td className="px-3 py-3 text-right text-sm text-blue-700">{item.processed}</td>
+                            <td className="px-3 py-3 text-right text-sm text-green-700">{item.approved}</td>
+                            <td className="px-3 py-3 text-right text-sm text-red-700">{item.rejected}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-3 text-sm font-semibold text-gray-800">Total</th>
+                          <th className="px-3 py-3 text-right text-sm font-semibold text-gray-800">{approvalSummary.totals?.requests || 0}</th>
+                          <th className="px-3 py-3 text-right text-sm font-semibold text-amber-700">{approvalSummary.totals?.pending || 0}</th>
+                          <th className="px-3 py-3 text-right text-sm font-semibold text-blue-700">{approvalSummary.totals?.processed || 0}</th>
+                          <th className="px-3 py-3 text-right text-sm font-semibold text-green-700">{approvalSummary.totals?.approved || 0}</th>
+                          <th className="px-3 py-3 text-right text-sm font-semibold text-red-700">{approvalSummary.totals?.rejected || 0}</th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {!approvalSummary.totals?.requests && !approvalSummary.totals?.processed && (
+                    <p className="mt-4 text-center text-sm text-gray-500">No requests were submitted or processed on this day.</p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

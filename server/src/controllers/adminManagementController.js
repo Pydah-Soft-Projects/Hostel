@@ -9,6 +9,7 @@ import {
   verifyHrmsPassword,
   searchHrmsEmployees as searchHrmsFromDb
 } from '../utils/hrmsService.js';
+import { getAllowedCourseNames } from '../utils/adminUtils.js';
 
 /** Infer legacy hostelType from hostel name when possible */
 const inferHostelTypeFromName = (name = '') => {
@@ -759,14 +760,7 @@ export const adminLogin = async (req, res, next) => {
            const allCourses = sqlCoursesResult.data;
            
            // Filter courses that match College IDs AND Levels
-           const matchingCourses = allCourses.filter(course => {
-             const collegeMatch = course.college_id && admin.assignedCollegeIds.includes(course.college_id);
-             const levelMatch = (!admin.assignedLevels || admin.assignedLevels.length === 0) || 
-                               (course.level && admin.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
-             return collegeMatch && levelMatch;
-           });
-           
-           const derivedCourses = matchingCourses.map(c => c.name);
+           const derivedCourses = await getAllowedCourseNames(admin);
            console.log(`🎓 [Login] Derived ${derivedCourses.length} courses from colleges for principal`);
            
            // Override/Inject assignedCourses in the token data and admin object for response
@@ -849,16 +843,17 @@ export const adminLogin = async (req, res, next) => {
 // Create a new principal
 export const createPrincipal = async (req, res, next) => {
   try {
-    const { assignedCollegeId, assignedCollegeIds, assignedLevels, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name } = req.body;
+    const { assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name } = req.body;
 
     // Validate College & Levels
     // Support both single ID (legacy) and array of IDs (new)
-    const hasCollege = (assignedCollegeIds && assignedCollegeIds.length > 0) || assignedCollegeId;
+    const hasCollege = (assignedCollegeScopes && assignedCollegeScopes.length > 0) || (assignedCollegeIds && assignedCollegeIds.length > 0) || assignedCollegeId;
     if (!hasCollege) {
       throw createError(400, 'College selection is required');
     }
 
-    if (!assignedLevels || !Array.isArray(assignedLevels) || assignedLevels.length === 0) {
+    const principalCollegeScopes = assignedCollegeScopes || (assignedCollegeIds || [assignedCollegeId]).filter(Boolean).map(collegeId => ({ collegeId, levels: assignedLevels || [] }));
+    if (principalCollegeScopes.some(scope => !Array.isArray(scope.levels) || scope.levels.length === 0)) {
       throw createError(400, 'At least one level (Diploma, UG, PG) must be selected');
     }
 
@@ -881,9 +876,10 @@ export const createPrincipal = async (req, res, next) => {
     // Create new principal
     const principalData = {
       role: 'principal',
-      assignedCollegeIds: assignedCollegeIds || (assignedCollegeId ? [assignedCollegeId] : []), // Normalize to array
-      assignedCollegeId: assignedCollegeId, // Keep for backward compatibility if needed, or remove if schema handles it
-      assignedLevels,
+      assignedCollegeIds: principalCollegeScopes.map(scope => Number(scope.collegeId)),
+      assignedCollegeScopes: principalCollegeScopes,
+      assignedLevels: [...new Set(principalCollegeScopes.flatMap(scope => scope.levels))],
+      assignedCollegeId: principalCollegeScopes[0]?.collegeId,
       permissions: principalPermissions,
       createdBy: req.admin._id
     };
@@ -949,10 +945,10 @@ export const getPrincipals = async (req, res, next) => {
 export const updatePrincipal = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { username, password, assignedCollegeId, assignedCollegeIds, assignedLevels, isActive, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name } = req.body;
+    const { username, password, assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, isActive, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name } = req.body;
 
     console.log('🎓 Updating principal:', id);
-    console.log('🎓 Update data:', { username, assignedCollegeId, assignedCollegeIds, assignedLevels, isActive, email });
+    console.log('🎓 Update data:', { username, assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, isActive, email });
 
     // Build query based on admin role
     let query = {
@@ -984,12 +980,18 @@ export const updatePrincipal = async (req, res, next) => {
       principal.usesHrmsAuth = false;
     }
     
-    if (assignedCollegeIds) {
+    if (assignedCollegeScopes) {
+      principal.assignedCollegeScopes = assignedCollegeScopes;
+      principal.assignedCollegeIds = assignedCollegeScopes.map(scope => Number(scope.collegeId));
+      principal.assignedCollegeId = principal.assignedCollegeIds[0];
+      principal.assignedLevels = [...new Set(assignedCollegeScopes.flatMap(scope => scope.levels || []))];
+    } else if (assignedCollegeIds) {
       principal.assignedCollegeIds = assignedCollegeIds;
       // If we are setting array, we might want to clear or sync the legacy single ID field if it exists
       if (assignedCollegeIds.length > 0) {
          principal.assignedCollegeId = assignedCollegeIds[0];
       }
+      principal.assignedCollegeScopes = assignedCollegeIds.map(collegeId => ({ collegeId, levels: assignedLevels || principal.assignedLevels || [] }));
     } else if (assignedCollegeId) {
        // Fallback for legacy requests
        principal.assignedCollegeId = assignedCollegeId;
@@ -998,6 +1000,10 @@ export const updatePrincipal = async (req, res, next) => {
     
     if (assignedLevels) {
       principal.assignedLevels = assignedLevels;
+      if (!assignedCollegeScopes && !assignedCollegeIds) {
+        const colleges = principal.assignedCollegeIds?.length ? principal.assignedCollegeIds : [principal.assignedCollegeId].filter(Boolean);
+        principal.assignedCollegeScopes = colleges.map(collegeId => ({ collegeId, levels: assignedLevels }));
+      }
     }
     
     if (typeof isActive === 'boolean') {

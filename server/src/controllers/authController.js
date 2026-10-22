@@ -9,6 +9,7 @@ import { fetchStudentCredentialsSQL } from '../utils/sqlService.js';
 import { enrichStudentAcademics } from '../utils/studentAcademicEnricher.js';
 import { overlayStudentDtoWithHostelRequest } from '../services/hostelRequestService.js';
 import { isApplicationActive } from '../utils/studentStatusUtils.js';
+import { getAllowedCourseNames } from '../utils/adminUtils.js';
 
 // TEMPORARY TOGGLE: Set to true to temporarily bypass hostel access deactivation check during login/auth
 const TEMPORARY_BYPASS_DEACTIVATION = true;
@@ -396,14 +397,7 @@ export const validate = async (req, res, next) => {
            const allCourses = sqlCoursesResult.data;
            
            // Filter courses that match College IDs AND Levels
-           const matchingCourses = allCourses.filter(course => {
-             const collegeMatch = course.college_id && req.user.assignedCollegeIds.includes(course.college_id);
-             const levelMatch = (!req.user.assignedLevels || req.user.assignedLevels.length === 0) || 
-                               (course.level && req.user.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
-             return collegeMatch && levelMatch;
-           });
-           
-           const derivedCourses = matchingCourses.map(c => c.name);
+           const derivedCourses = await getAllowedCourseNames(req.user);
            console.log(`🎓 [Validate] Derived ${derivedCourses.length} courses from colleges for principal`);
            
            userResponse.assignedCourses = derivedCourses;

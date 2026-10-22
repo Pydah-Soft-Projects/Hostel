@@ -1517,7 +1517,7 @@ export const listPrincipalComplaints = async (req, res) => {
     });
 
     // Get principal's assigned details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     
     if (!principal) {
       return res.status(404).json({
@@ -1644,7 +1644,7 @@ export const principalGetTimeline = async (req, res) => {
     console.log('🎓 Principal timeline request:', { complaintId: id, principalId });
 
     // Get principal details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       return res.status(404).json({
         success: false,
@@ -1723,7 +1723,7 @@ export const principalGetComplaintDetails = async (req, res) => {
     console.log('🎓 Principal complaint details request:', { complaintId: id, principalId });
 
     // Get principal details
-    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedLevels');
+    const principal = await Admin.findById(principalId).select('course branch assignedCourses assignedCollegeIds assignedCollegeId assignedCollegeScopes assignedLevels');
     if (!principal) {
       return res.status(404).json({
         success: false,

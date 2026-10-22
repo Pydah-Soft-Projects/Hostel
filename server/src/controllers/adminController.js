@@ -18,6 +18,7 @@ import Counter from '../models/Counter.js';
 import axios from 'axios';
 import { fetchStudentByIdentifier, testSQLConnection } from '../utils/sqlService.js';
 import { normalizeBatchToYear, getBatchEndYear, validateAcademicYearForBatch } from '../utils/batchUtils.js';
+import { getAllowedCourseNames } from '../utils/adminUtils.js';
 import {
   enrichStudentAcademics,
   enrichStudentsAcademics,
@@ -2319,7 +2320,7 @@ export const getDashboardSummary = async (req, res, next) => {
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count);
     } else {
-      const activeFilter = { role: 'student', applicationStatus: { $in: ['Active', 'Extended'] }, applicationStatus: { $nin: ['Expired', 'Withdrawn'] } };
+      const activeFilter = { role: 'student', applicationStatus: { $in: ['Active', 'Extended'] } };
       const [activeCount, totalCount, newCount, studentsByCourseRaw] = await Promise.all([
         User.countDocuments(activeFilter),
         User.countDocuments({ role: 'student' }),
@@ -2350,7 +2351,7 @@ export const getDashboardSummary = async (req, res, next) => {
       ayActiveOccupied
     ] = await Promise.all([
       Complaint.aggregate([
-        { $group: { _id: '$status', count: { $sum: 1 } } }
+        { $group: { _id: '$currentStatus', count: { $sum: 1 } } }
       ]),
       Leave.aggregate([
         { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -2376,11 +2377,21 @@ export const getDashboardSummary = async (req, res, next) => {
       return acc;
     }, {});
     const totalComplaints = Object.values(complaintsMap).reduce((a, b) => a + b, 0);
+    const pendingComplaints = complaintsMap['Received'] || 0;
+    const activeComplaints = pendingComplaints + (complaintsMap['In Progress'] || 0);
 
     const leavesMap = (leaveStats || []).reduce((acc, curr) => {
       acc[curr._id] = curr.count;
       return acc;
     }, {});
+    const pendingLeaveStatuses = [
+      'Pending',
+      'Pending OTP Verification',
+      'Warden Verified',
+      'Warden Recommended',
+      'Pending Principal Approval'
+    ];
+    const pendingLeaves = pendingLeaveStatuses.reduce((total, status) => total + (leavesMap[status] || 0), 0);
 
     const rStats = roomStatsRaw[0] || { totalRooms: 0, totalCapacity: 0 };
     const occupiedBeds = requestOccupied || 0;
@@ -2403,12 +2414,13 @@ export const getDashboardSummary = async (req, res, next) => {
         },
         complaints: {
           total: totalComplaints,
-          active: (complaintsMap['Pending'] || 0) + (complaintsMap['In Progress'] || 0),
+          pending: pendingComplaints,
+          active: activeComplaints,
           resolved: complaintsMap['Resolved'] || 0,
           inProgress: complaintsMap['In Progress'] || 0
         },
         leaves: {
-          pending: leavesMap['Pending'] || 0,
+          pending: pendingLeaves,
           approved: leavesMap['Approved'] || 0,
           rejected: leavesMap['Rejected'] || 0
         },
@@ -2775,40 +2787,7 @@ export const getStudentsByPrincipalCourse = async (req, res, next) => {
     const principal = req.principal; // From principalAuth middleware
 
     // Determine allowed courses for the principal
-    let allowedCourses = [];
-    
-    // New Logic: Filter by Assigned Colleges & Levels
-    if (principal.assignedCollegeIds && principal.assignedCollegeIds.length > 0) {
-      try {
-        const { fetchCoursesFromSQL } = await import('../utils/sqlService.js');
-        const sqlCoursesResult = await fetchCoursesFromSQL();
-        
-        if (sqlCoursesResult.success) {
-           const allCourses = sqlCoursesResult.data;
-           
-           // Filter courses that match College IDs AND Levels
-           const matchingCourses = allCourses.filter(course => {
-             const collegeMatch = course.college_id && principal.assignedCollegeIds.includes(course.college_id);
-             const levelMatch = (!principal.assignedLevels || principal.assignedLevels.length === 0) || 
-                               (course.level && principal.assignedLevels.map(l => l.toLowerCase()).includes(course.level.toLowerCase()));
-             return collegeMatch && levelMatch;
-           });
-           
-           allowedCourses = matchingCourses.map(c => normalizeCourseName(c.name));
-        }
-      } catch (err) {
-        console.error('🎓 Error fetching SQL courses for principal filter:', err);
-      }
-    }
-    
-    // Fallback/Legacy Logic
-    if (allowedCourses.length === 0) {
-      if (principal.assignedCourses && principal.assignedCourses.length > 0) {
-        allowedCourses = principal.assignedCourses.map(c => normalizeCourseName(c.trim()));
-      } else if (principal.course) {
-        allowedCourses = [normalizeCourseName(principal.course.trim())];
-      }
-    }
+    const allowedCourses = (await getAllowedCourseNames(principal)).map(normalizeCourseName);
 
     if (allowedCourses.length === 0) {
       throw createError(400, 'Principal has no assigned courses');

@@ -33,10 +33,12 @@ import {
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import SEO from '../../components/SEO';
+import { useAuth } from '../../context/AuthContext';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
 const StaffGuestsManagement = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('management');
   const [staffGuests, setStaffGuests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -117,6 +119,14 @@ const StaffGuestsManagement = () => {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [admitCardData, setAdmitCardData] = useState(null);
   const [admitCardLoading, setAdmitCardLoading] = useState(false);
+
+  const getTabAccessLevel = (tabId) => {
+    if (user?.role === 'super_admin') return 'full';
+    return user?.permissionAccessLevels?.[`staff_guests_management:${tabId}`]
+      || user?.permissionAccessLevels?.staff_guests_management
+      || 'view';
+  };
+  const canWriteTab = (tabId) => getTabAccessLevel(tabId) === 'full';
 
   useEffect(() => {
     fetchStaffGuests();
@@ -340,6 +350,7 @@ const StaffGuestsManagement = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!canWriteTab('management')) return;
     try {
       // Create a copy and inject defaults for Warden
       const dataToProcess = { ...formData };
@@ -417,6 +428,7 @@ const StaffGuestsManagement = () => {
   };
 
   const handleEdit = async (staffGuest) => {
+    if (!canWriteTab('management')) return;
     setEditingStaffGuest(staffGuest);
 
     // Populate form with existing data
@@ -459,6 +471,7 @@ const StaffGuestsManagement = () => {
   };
 
   const handleDelete = async (id, onSuccess) => {
+    if (!canWriteTab('management')) return;
     if (window.confirm('Are you sure you want to delete this staff/guest?')) {
       try {
         await api.delete(`/api/admin/staff-guests/${id}`);
@@ -474,6 +487,7 @@ const StaffGuestsManagement = () => {
   };
 
   const handleCheckInOut = async (id, action) => {
+    if (!canWriteTab('management')) return;
     try {
       await api.post(`/api/admin/staff-guests/${id}/checkin-out`, { action });
       toast.success(`Staff/Guest ${action === 'checkin' ? 'checked in' : 'checked out'} successfully`);
@@ -553,6 +567,7 @@ const StaffGuestsManagement = () => {
 
   // Handle renewal
   const handleRenewal = async () => {
+    if (!canWriteTab('management')) return;
     if (!renewalForm.selectedMonth) {
       toast.error('Please select a month for renewal');
       return;
@@ -617,6 +632,7 @@ const StaffGuestsManagement = () => {
   };
 
   const updateDailyRateSettings = async () => {
+    if (!canWriteTab('settings')) return;
     try {
       setSettingsLoading(true);
       const response = await api.put('/api/admin/staff-guests/settings/daily-rates', {
@@ -639,6 +655,7 @@ const StaffGuestsManagement = () => {
 
   // Admit Card functions
   const generateAdmitCard = async (staffGuestId) => {
+    if (!canWriteTab('admit-card')) return;
     try {
       setAdmitCardLoading(true);
       const response = await api.get(`/api/admin/staff-guests/${staffGuestId}/admit-card`);
@@ -694,6 +711,7 @@ const StaffGuestsManagement = () => {
 
   // Generate PDF for staff/guest admit card with two copies
   const generateStaffAdmitCardPDF = async (staffGuest) => {
+    if (!canWriteTab('management')) return;
     try {
       const staffGuestId = staffGuest._id || staffGuest.id || staffGuest;
       console.log('Requesting Staff/Guest Admit Card from Print API for ID:', staffGuestId);
@@ -1063,7 +1081,7 @@ const StaffGuestsManagement = () => {
 
 
   const printAdmitCard = () => {
-    if (!admitCardData) return;
+    if (!admitCardData || !canWriteTab('admit-card')) return;
     generateStaffAdmitCardPDF(admitCardData);
   };
 
@@ -1093,15 +1111,13 @@ const StaffGuestsManagement = () => {
                 ? 'Manage staff and guest information and track their visits'
                 : activeTab === 'attendance'
                   ? 'View and analyze staff and guest attendance records'
-                  : activeTab === 'admit-card'
-                    ? 'Generate and print admit cards for staff and guests'
-                    : activeTab === 'settings'
-                      ? 'Configure daily rates and system settings'
-                      : 'Staff and guest management system'
+                  : activeTab === 'settings'
+                    ? 'Configure daily rates and system settings'
+                    : 'Staff and guest management system'
               }
             </p>
           </div>
-          {activeTab === 'management' && (
+          {activeTab === 'management' && canWriteTab('management') && (
             <button
               onClick={() => setShowForm(true)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -1142,20 +1158,6 @@ const StaffGuestsManagement = () => {
                 <div className="flex items-center gap-1 sm:gap-2 justify-center">
                   <ChartBarIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                   <span className="text-xs sm:text-sm">Attendance</span>
-                </div>
-              </button>
-
-              {/* Admit Card Button */}
-              <button
-                onClick={() => setActiveTab('admit-card')}
-                className={`w-1/2 sm:w-auto py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'admit-card'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-              >
-                <div className="flex items-center gap-1 sm:gap-2 justify-center">
-                  <DocumentTextIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                  <span className="text-xs sm:text-sm">Admit Card</span>
                 </div>
               </button>
 
@@ -1729,7 +1731,7 @@ const StaffGuestsManagement = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button
                               onClick={() => generateAdmitCard(staffGuest._id)}
-                              disabled={admitCardLoading}
+                              disabled={admitCardLoading || !canWriteTab('admit-card')}
                               className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                             >
                               <DocumentArrowDownIcon className="w-4 h-4" />
@@ -1758,6 +1760,7 @@ const StaffGuestsManagement = () => {
                     <h3 className="text-lg font-semibold text-gray-900">Admit Card Preview</h3>
                     <button
                       onClick={() => generateStaffAdmitCardPDF(admitCardData)}
+                      disabled={!canWriteTab('admit-card')}
                       className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
                     >
                       <DocumentArrowDownIcon className="w-4 h-4" />
@@ -1944,6 +1947,7 @@ const StaffGuestsManagement = () => {
                     <input
                       type="number"
                       value={dailyRateSettings.staffDailyRate}
+                      disabled={!canWriteTab('settings')}
                       onChange={(e) => setDailyRateSettings(prev => ({
                         ...prev,
                         staffDailyRate: parseFloat(e.target.value) || 0
@@ -1966,6 +1970,7 @@ const StaffGuestsManagement = () => {
                     <input
                       type="number"
                       value={dailyRateSettings.monthlyFixedAmount}
+                      disabled={!canWriteTab('settings')}
                       onChange={(e) => setDailyRateSettings(prev => ({
                         ...prev,
                         monthlyFixedAmount: parseFloat(e.target.value) || 0
@@ -1980,13 +1985,13 @@ const StaffGuestsManagement = () => {
                 </div>
 
                 <div className="pt-4 border-t border-gray-200">
-                  <button
+                  {canWriteTab('settings') && <button
                     onClick={updateDailyRateSettings}
                     disabled={settingsLoading}
                     className="w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
                   >
                     {settingsLoading ? 'Updating...' : 'Update Settings'}
-                  </button>
+                  </button>}
                 </div>
 
                 {dailyRateSettings.lastUpdated && (
@@ -2019,7 +2024,7 @@ const StaffGuestsManagement = () => {
 
         {/* Add/Edit Form Modal */}
         <AnimatePresence>
-          {showForm && (
+          {showForm && canWriteTab('management') && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2870,6 +2875,7 @@ const StaffGuestsManagement = () => {
                             });
                             setShowRenewalModal(true);
                           }}
+                            disabled={!canWriteTab('management')}
                           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                         >
                           <StarIcon className="w-4 h-4" />
@@ -2881,6 +2887,7 @@ const StaffGuestsManagement = () => {
                         handleEdit(selectedStaffGuest);
                         setShowDetailModal(false);
                       }}
+                      disabled={!canWriteTab('management')}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
                       <PencilIcon className="w-4 h-4" />
@@ -2890,6 +2897,7 @@ const StaffGuestsManagement = () => {
                       onClick={() => {
                         generateStaffAdmitCardPDF(selectedStaffGuest);
                       }}
+                      disabled={!canWriteTab('management')}
                       className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                     >
                       <DocumentArrowDownIcon className="w-4 h-4" />
@@ -2901,6 +2909,7 @@ const StaffGuestsManagement = () => {
                           handleCheckInOut(selectedStaffGuest._id, 'checkout');
                           setShowDetailModal(false);
                         }}
+                        disabled={!canWriteTab('management')}
                         className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
                       >
                         <EyeSlashIcon className="w-4 h-4" />
@@ -2912,6 +2921,7 @@ const StaffGuestsManagement = () => {
                           handleCheckInOut(selectedStaffGuest._id, 'checkin');
                           setShowDetailModal(false);
                         }}
+                        disabled={!canWriteTab('management')}
                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                       >
                         <EyeIcon className="w-4 h-4" />
@@ -2924,6 +2934,7 @@ const StaffGuestsManagement = () => {
                           setShowDetailModal(false);
                         });
                       }}
+                      disabled={!canWriteTab('management')}
                       className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                     >
                       <TrashIcon className="w-4 h-4" />

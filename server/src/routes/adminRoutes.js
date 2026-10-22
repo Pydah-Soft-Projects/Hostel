@@ -67,6 +67,7 @@ import {
 import { initializeHostelCounters, getCounterStatus } from '../utils/initializeCounters.js';
 import { 
   getAllLeaveRequests,
+  getLeaveApprovalAbstract,
   verifyOTPAndApprove,
   rejectLeaveRequest
 } from '../controllers/leaveController.js';
@@ -96,6 +97,27 @@ import { fetchStudentFromSQL, testConnection as testSQLConnection, getColleges a
 import multer from 'multer';
 
 const router = express.Router();
+
+const staffGuestsTabAccess = (tabId, requireWrite = false) => (req, res, next) => {
+  const admin = req.admin;
+  if (admin?.role === 'super_admin') return next();
+
+  if (!admin?.permissions?.includes('staff_guests_management')) {
+    return res.status(403).json({ success: false, message: 'Staff/Guests Management permission is required.' });
+  }
+
+  const accessLevels = admin.permissionAccessLevels;
+  const getLevel = key => typeof accessLevels?.get === 'function' ? accessLevels.get(key) : accessLevels?.[key];
+  const accessLevel = getLevel(`staff_guests_management:${tabId}`)
+    || getLevel('staff_guests_management')
+    || 'view';
+
+  if (requireWrite && accessLevel !== 'full') {
+    return res.status(403).json({ success: false, message: `Write access to the ${tabId} tab is required.` });
+  }
+
+  next();
+};
 
 // Setup multer for in-memory file storage
 const storage = multer.memoryStorage();
@@ -201,6 +223,7 @@ router.post('/email/test', async (req, res) => {
 
 // Leave management routes
 router.get('/leave/all', getAllLeaveRequests);
+router.get('/leave/approval-abstract', getLeaveApprovalAbstract);
 router.post('/leave/verify-otp', verifyOTPAndApprove);
 router.post('/leave/reject', rejectLeaveRequest);
 router.get('/sms/balance', getSMSBalance);
@@ -321,27 +344,27 @@ router.get('/rooms/bed-availability', getRoomsWithBedAvailability);
 router.get('/rooms/:roomNumber/bed-locker-availability', getRoomBedLockerAvailability);
 
 // Staff/Guests management routes
-router.post('/staff-guests', imageUpload.single('photo'), addStaffGuest);
-router.get('/staff-guests', getStaffGuests);
-router.get('/staff-guests/stats', getStaffGuestStats);
-router.get('/staff-guests/:id', getStaffGuestById);
-router.put('/staff-guests/:id', imageUpload.single('photo'), updateStaffGuest);
-router.delete('/staff-guests/:id', deleteStaffGuest);
-router.post('/staff-guests/:id/checkin-out', checkInOutStaffGuest);
-router.post('/staff-guests/:id/renew', renewMonthlyStaff);
+router.post('/staff-guests', staffGuestsTabAccess('management', true), imageUpload.single('photo'), addStaffGuest);
+router.get('/staff-guests', staffGuestsTabAccess('management'), getStaffGuests);
+router.get('/staff-guests/stats', staffGuestsTabAccess('management'), getStaffGuestStats);
+router.get('/staff-guests/:id', staffGuestsTabAccess('management'), getStaffGuestById);
+router.put('/staff-guests/:id', staffGuestsTabAccess('management', true), imageUpload.single('photo'), updateStaffGuest);
+router.delete('/staff-guests/:id', staffGuestsTabAccess('management', true), deleteStaffGuest);
+router.post('/staff-guests/:id/checkin-out', staffGuestsTabAccess('management', true), checkInOutStaffGuest);
+router.post('/staff-guests/:id/renew', staffGuestsTabAccess('management', true), renewMonthlyStaff);
 
 // Staff Attendance management routes
-router.get('/staff-attendance', getStaffAttendanceForDate);
-router.get('/staff-attendance/stats', getStaffAttendanceStats);
-router.get('/staff-attendance/range', getStaffAttendanceForDateRange);
-router.post('/staff-attendance', takeStaffAttendance);
-router.put('/staff-attendance', updateStaffAttendance);
-router.delete('/staff-attendance/:staffId/:date', deleteStaffAttendance);
-router.get('/staff-attendance/count', getStaffCount);
+router.get('/staff-attendance', staffGuestsTabAccess('attendance'), getStaffAttendanceForDate);
+router.get('/staff-attendance/stats', staffGuestsTabAccess('attendance'), getStaffAttendanceStats);
+router.get('/staff-attendance/range', staffGuestsTabAccess('attendance'), getStaffAttendanceForDateRange);
+router.post('/staff-attendance', staffGuestsTabAccess('attendance', true), takeStaffAttendance);
+router.put('/staff-attendance', staffGuestsTabAccess('attendance', true), updateStaffAttendance);
+router.delete('/staff-attendance/:staffId/:date', staffGuestsTabAccess('attendance', true), deleteStaffAttendance);
+router.get('/staff-attendance/count', staffGuestsTabAccess('attendance'), getStaffCount);
 
 // Staff/Guest Settings and Admit Card routes
-router.get('/staff-guests/settings/daily-rates', getDailyRateSettings);
-router.put('/staff-guests/settings/daily-rates', updateDailyRateSettings);
-router.get('/staff-guests/:id/admit-card', generateStaffGuestAdmitCard);
+router.get('/staff-guests/settings/daily-rates', staffGuestsTabAccess('settings'), getDailyRateSettings);
+router.put('/staff-guests/settings/daily-rates', staffGuestsTabAccess('settings', true), updateDailyRateSettings);
+router.get('/staff-guests/:id/admit-card', staffGuestsTabAccess('admit-card'), generateStaffGuestAdmitCard);
 
 export default router; 
