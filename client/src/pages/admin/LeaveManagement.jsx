@@ -38,7 +38,12 @@ const formatDateTimeIndia = (value) => value
   })
   : '—';
 
-const getDefaultApprovalDate = () => getTodayDateInput();
+const getDefaultApprovalDateRange = (days = 3) => {
+  const today = getTodayDateInput();
+  const from = new Date(`${today}T00:00:00.000Z`);
+  from.setUTCDate(from.getUTCDate() - (days - 1));
+  return { fromDate: from.toISOString().slice(0, 10), toDate: today };
+};
 
 const LeaveManagement = () => {
   const [leaves, setLeaves] = useState([]);
@@ -58,7 +63,8 @@ const LeaveManagement = () => {
     fromDate: '',
     toDate: ''
   });
-  const [approvalDate, setApprovalDate] = useState(getDefaultApprovalDate);
+  const [approvalRangeDays, setApprovalRangeDays] = useState('3');
+  const [approvalDateRange, setApprovalDateRange] = useState(getDefaultApprovalDateRange);
   const [approvalSummary, setApprovalSummary] = useState([]);
   const [approvalSummaryLoading, setApprovalSummaryLoading] = useState(false);
 
@@ -117,7 +123,7 @@ const LeaveManagement = () => {
     if (activeTab === 'approval-abstract') {
       fetchApprovalAbstract();
     }
-  }, [activeTab, approvalDate]);
+  }, [activeTab, approvalDateRange]);
 
   const fetchSMSBalance = async () => {
     setSmsLoading(true);
@@ -134,6 +140,7 @@ const LeaveManagement = () => {
   };
 
   const fetchLeaves = async () => {
+    setLoading(true);
     try {
       const params = { ...debouncedFilters };
       if (!params.status) delete params.status;
@@ -181,7 +188,7 @@ const LeaveManagement = () => {
   const fetchApprovalAbstract = async () => {
     setApprovalSummaryLoading(true);
     try {
-      const response = await api.get('/api/admin/leave/approval-abstract', { params: { date: approvalDate } });
+      const response = await api.get('/api/admin/leave/approval-abstract', { params: approvalDateRange });
       if (response.data.success) {
         setApprovalSummary(response.data.data || []);
       }
@@ -530,7 +537,7 @@ const LeaveManagement = () => {
         {/* Content based on active tab */}
         {activeTab === 'leaves' ? (
           /* Leave List */
-          <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
+          <div className="w-full">
             {loading ? (
               <div className="p-4 sm:p-8 text-center">
                 <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto"></div>
@@ -540,7 +547,7 @@ const LeaveManagement = () => {
                 <p className="text-sm sm:text-base">No requests found</p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-fr items-stretch gap-4">
                 {leaves.map((leave) => {
                   const displayInfo = formatDisplayDate(leave);
                   return (
@@ -548,7 +555,7 @@ const LeaveManagement = () => {
                       key={leave._id}
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-3 sm:p-4 lg:p-6 hover:bg-gray-50 transition-colors"
+                      className="h-full rounded-lg border border-gray-200 bg-white p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -872,18 +879,57 @@ const LeaveManagement = () => {
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 p-4 sm:p-6 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Daily Request Abstract</h2>
-                <p className="mt-1 text-sm text-gray-500">Requests submitted and processed on {formatDateIndia(approvalDate)} (IST).</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Requests submitted and processed from {formatDateIndia(approvalDateRange.fromDate)} to {formatDateIndia(approvalDateRange.toDate)} (IST).
+                </p>
               </div>
-              <label className="block w-full text-xs font-medium text-gray-600 sm:w-56">
-                Approval Day <span className="text-gray-400">(DD/MM/YYYY)</span>
-                <input
-                  type="date"
-                  lang="en-IN"
-                  value={approvalDate}
-                  onChange={event => setApprovalDate(event.target.value)}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full sm:w-auto">
+                <label className="block text-xs font-medium text-gray-600">
+                  Recent range
+                  <select
+                    value={approvalRangeDays}
+                    onChange={event => {
+                      const days = event.target.value;
+                      setApprovalRangeDays(days);
+                      if (days !== 'custom') {
+                        setApprovalDateRange(getDefaultApprovalDateRange(Number(days)));
+                      }
+                    }}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  >
+                    <option value="3">Last 3 days</option>
+                    <option value="5">Last 5 days</option>
+                    <option value="7">Last 7 days</option>
+                    <option value="custom">Custom range</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium text-gray-600">
+                  From <span className="text-gray-400">(DD/MM/YYYY)</span>
+                  <input
+                    type="date"
+                    lang="en-IN"
+                    value={approvalDateRange.fromDate}
+                    onChange={event => {
+                      setApprovalRangeDays('custom');
+                      setApprovalDateRange(range => ({ ...range, fromDate: event.target.value }));
+                    }}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </label>
+                <label className="block text-xs font-medium text-gray-600">
+                  To <span className="text-gray-400">(DD/MM/YYYY)</span>
+                  <input
+                    type="date"
+                    lang="en-IN"
+                    value={approvalDateRange.toDate}
+                    onChange={event => {
+                      setApprovalRangeDays('custom');
+                      setApprovalDateRange(range => ({ ...range, toDate: event.target.value }));
+                    }}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </label>
+              </div>
             </div>
 
             <div className="p-4 sm:p-6">
@@ -914,6 +960,40 @@ const LeaveManagement = () => {
                     </div>
                   </div>
 
+                  <h3 className="mb-2 text-sm font-semibold text-gray-900">Day-wise Summary</h3>
+                  <div className="mb-5 overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="min-w-[720px] w-full divide-y divide-gray-200 text-left">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2.5 text-xs font-semibold uppercase text-gray-500">Date</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Requests</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Pending</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Processed</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Approved</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Rejected</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {(approvalSummary.days || []).map(day => (
+                          <tr key={day.date} className="hover:bg-gray-50">
+                            <td className="px-3 py-3 text-sm font-medium text-gray-900">{formatDateIndia(day.date)}</td>
+                            <td className="px-3 py-3 text-right text-sm text-gray-800">{day.requests}</td>
+                            <td className="px-3 py-3 text-right text-sm text-amber-700">{day.pending}</td>
+                            <td className="px-3 py-3 text-right text-sm text-blue-700">{day.processed}</td>
+                            <td className="px-3 py-3 text-right text-sm text-green-700">{day.approved}</td>
+                            <td className="px-3 py-3 text-right text-sm text-red-700">{day.rejected}</td>
+                          </tr>
+                        ))}
+                        {!(approvalSummary.days || []).length && (
+                          <tr>
+                            <td colSpan="6" className="px-3 py-6 text-center text-sm text-gray-500">No requests in this date range.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <h3 className="mb-2 text-sm font-semibold text-gray-900">Request Type Breakdown</h3>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="min-w-[720px] w-full divide-y divide-gray-200 text-left">
                       <thead className="bg-gray-50">
@@ -951,7 +1031,7 @@ const LeaveManagement = () => {
                     </table>
                   </div>
                   {!approvalSummary.totals?.requests && !approvalSummary.totals?.processed && (
-                    <p className="mt-4 text-center text-sm text-gray-500">No requests were submitted or processed on this day.</p>
+                    <p className="mt-4 text-center text-sm text-gray-500">No requests were submitted or processed in this date range.</p>
                   )}
                 </>
               )}

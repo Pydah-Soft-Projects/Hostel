@@ -1009,13 +1009,16 @@ export const getAllLeaveRequests = async (req, res, next) => {
 
 export const getLeaveApprovalAbstract = async (req, res, next) => {
   try {
-    const { date } = req.query;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
-      throw createError(400, 'A valid date is required');
+    const { fromDate, toDate } = req.query;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(toDate || '')) {
+      throw createError(400, 'Valid fromDate and toDate are required');
     }
 
-    const start = getISTStartOfDay(date);
-    const end = getISTEndOfDay(date);
+    const start = getISTStartOfDay(fromDate);
+    const end = getISTEndOfDay(toDate);
+    if (start > end) {
+      throw createError(400, 'fromDate cannot be after toDate');
+    }
 
     const baseMatch = { reason: { $not: /^Bulk outing:/ } };
 
@@ -1025,9 +1028,11 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
         return res.json({
           success: true,
           data: {
-            date,
+            fromDate,
+            toDate,
             totals: { requests: 0, processed: 0, approved: 0, rejected: 0, pending: 0 },
-            byType: []
+            byType: [],
+            days: []
           }
         });
       }
@@ -1049,7 +1054,10 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
         { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
         {
           $group: {
-            _id: '$applicationType',
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
+              applicationType: '$applicationType'
+            },
             requests: { $sum: 1 },
             pending: { $sum: { $cond: [{ $in: ['$status', pendingStatuses] }, 1, 0] } }
           }
@@ -1067,7 +1075,10 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
         { $match: { approvalProcessedAt: { $gte: start, $lte: end } } },
         {
           $group: {
-            _id: '$applicationType',
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$approvalProcessedAt', timezone: 'Asia/Kolkata' } },
+              applicationType: '$applicationType'
+            },
             processed: { $sum: 1 },
             approved: { $sum: { $cond: [{ $in: ['$status', approvedStatuses] }, 1, 0] } },
             rejected: { $sum: { $cond: [{ $in: ['$status', rejectedStatuses] }, 1, 0] } }
@@ -1077,18 +1088,70 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
     ]);
 
     const typeNames = ['Leave', 'Permission', 'Stay in Hostel'];
-    const byType = typeNames.map(type => {
-      const created = createdCounts.find(item => item._id === type) || {};
-      const processed = processedCounts.find(item => item._id === type) || {};
-      return {
-        applicationType: type,
-        requests: created.requests || 0,
-        pending: created.pending || 0,
-        processed: processed.processed || 0,
-        approved: processed.approved || 0,
-        rejected: processed.rejected || 0
-      };
+    const byDate = new Map();
+    const byTypeMap = new Map(typeNames.map(type => [type, {
+      applicationType: type,
+      requests: 0,
+      pending: 0,
+      processed: 0,
+      approved: 0,
+      rejected: 0
+    }]));
+
+    const getDay = date => {
+      if (!byDate.has(date)) {
+        byDate.set(date, {
+          date,
+          requests: 0,
+          pending: 0,
+          processed: 0,
+          approved: 0,
+          rejected: 0,
+          byType: new Map(typeNames.map(type => [type, {
+            applicationType: type,
+            requests: 0,
+            pending: 0,
+            processed: 0,
+            approved: 0,
+            rejected: 0
+          }]))
+        });
+      }
+      return byDate.get(date);
+    };
+
+    createdCounts.forEach(item => {
+      const type = item._id.applicationType;
+      const day = getDay(item._id.date);
+      const dayType = day.byType.get(type);
+      const totalType = byTypeMap.get(type);
+      [day, dayType, totalType].forEach(target => {
+        if (!target) return;
+        target.requests += item.requests || 0;
+        target.pending += item.pending || 0;
+      });
     });
+
+    processedCounts.forEach(item => {
+      const type = item._id.applicationType;
+      const day = getDay(item._id.date);
+      const dayType = day.byType.get(type);
+      const totalType = byTypeMap.get(type);
+      [day, dayType, totalType].forEach(target => {
+        if (!target) return;
+        target.processed += item.processed || 0;
+        target.approved += item.approved || 0;
+        target.rejected += item.rejected || 0;
+      });
+    });
+
+    const byType = Array.from(byTypeMap.values());
+    const days = Array.from(byDate.values())
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map(day => ({
+        ...day,
+        byType: Array.from(day.byType.values())
+      }));
 
     const totals = byType.reduce((acc, item) => ({
       requests: acc.requests + item.requests,
@@ -1098,7 +1161,7 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
       rejected: acc.rejected + item.rejected
     }), { requests: 0, pending: 0, processed: 0, approved: 0, rejected: 0 });
 
-    res.json({ success: true, data: { date, totals, byType } });
+    res.json({ success: true, data: { fromDate, toDate, totals, byType, days } });
   } catch (error) {
     next(error);
   }
