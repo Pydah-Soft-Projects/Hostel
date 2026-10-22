@@ -66,7 +66,7 @@ const PaymentStatus = lazy(() => import('./pages/student/PaymentStatus'));
 
 // Warden components
 const WardenHome = lazy(() => import('./pages/warden/WardenHome'));
-const WardenTakeAttendance = lazy(() => import('./pages/warden/TakeAttendance'));
+const WardenAttendanceManagement = lazy(() => import('./pages/warden/AttendanceManagement'));
 const WardenViewAttendance = lazy(() => import('./pages/warden/ViewAttendance'));
 const BulkOuting = lazy(() => import('./pages/warden/BulkOuting'));
 const WardenRaiseComplaint = lazy(() => import('./pages/warden/WardenRaiseComplaint'));
@@ -77,7 +77,6 @@ const WardenFeeManagement = lazy(() => import('./pages/warden/FeeManagement'));
 const WardenLeaveManagement = lazy(() => import('./pages/warden/LeaveManagement'));
 const WardenApplyLeaveOnBehalf = lazy(() => import('./pages/warden/ApplyLeaveOnBehalf'));
 const WardenElectricityBills = lazy(() => import('./pages/warden/ElectricityBills'));
-const WardenTakeStaffAttendance = lazy(() => import('./pages/warden/TakeStaffAttendance'));
 const WardenNOCManagement = lazy(() => import('./pages/warden/NOCManagement'));
 const WardenRoomChangeRequests = lazy(() => import('./pages/warden/RoomChangeRequests'));
 const WardenCategoryChangeRequests = lazy(() => import('./pages/warden/CategoryChangeRequests'));
@@ -326,7 +325,7 @@ function App() {
                   }
                 >
                   <Route index element={<WardenHome />} />
-                  <Route path="take-attendance" element={<WardenTakeAttendance />} />
+                  <Route path="take-attendance" element={<WardenAttendanceManagement />} />
                   <Route path="view-attendance" element={<WardenViewAttendance />} />
                   <Route path="bulk-outing" element={<BulkOuting />} />
                   <Route path="complaints/raise" element={<WardenRaiseComplaint />} />
@@ -337,7 +336,7 @@ function App() {
                   <Route path="stay-in-hostel-requests" element={<StayInHostelRequests />} />
                   <Route path="fee-management" element={<WardenFeeManagement />} />
                   <Route path="electricity-bills" element={<WardenElectricityBills />} />
-                  <Route path="take-staff-attendance" element={<WardenTakeStaffAttendance />} />
+                  <Route path="take-staff-attendance" element={<WardenAttendanceManagement initialTab="staff" />} />
                   <Route path="noc-management" element={<WardenNOCManagement />} />
                   <Route path="room-change-requests" element={<WardenRoomChangeRequests />} />
                   <Route path="category-change-requests" element={<WardenCategoryChangeRequests />} />

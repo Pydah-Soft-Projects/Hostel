@@ -236,9 +236,12 @@ export const getStudentsForAttendance = async (req, res, next) => {
       return true;
     });
 
-    const studentIdsWithAttendance = validAttendance
+    const studentIdsWithAttendance = new Set(validAttendance
       .filter(att => att.student && att.student._id) // Additional safety check
-      .map(att => att.student._id.toString());
+      .map(att => att.student._id.toString()));
+    const eligibleStudentIds = new Set(students.map(student => student._id.toString()));
+    const attendanceTaken = [...studentIdsWithAttendance]
+      .filter(studentId => eligibleStudentIds.has(studentId)).length;
 
     // Get approved leaves for the date
     const startOfDay = normalizedDate;
@@ -307,7 +310,7 @@ export const getStudentsForAttendance = async (req, res, next) => {
         students: studentsWithAttendance,
         date: normalizedDate,
         totalStudents: students.length,
-        attendanceTaken: studentIdsWithAttendance.length
+        attendanceTaken
       }
     });
   } catch (error) {
@@ -370,7 +373,8 @@ export const takeAttendance = async (req, res, next) => {
     // Batch validate all students at once
     const validStudents = await User.find({ 
       _id: { $in: studentIds }, 
-      role: 'student'
+      role: 'student',
+      applicationStatus: { $in: ['Active', 'Extended'] }
     }).select('_id name joiningDate admitDate createdAt applicationStatus');
 
     console.log('📌 [takeAttendance] DB query matched students count:', validStudents.length);

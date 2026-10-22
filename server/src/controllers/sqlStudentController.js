@@ -34,6 +34,7 @@ const mapStudentData = (sqlData) => {
     course: sqlData.course || '',
     branch: sqlData.branch || '',
     year: sqlData.current_year || 1,
+    semester: sqlData.current_semester || null,
     batch: normalizeBatchToYear(sqlData.batch),
     
     // Personal info

@@ -8,6 +8,7 @@ import {
   TrashIcon,
   XMarkIcon,
   UserIcon,
+  AcademicCapIcon,
   PhoneIcon,
   EnvelopeIcon,
   BuildingOfficeIcon,
@@ -69,6 +70,16 @@ const StaffGuestsManagement = () => {
   const [formData, setFormData] = useState({
     name: '',
     type: 'staff',
+    collegeSource: 'other-college',
+    collegeName: '',
+    rollNumber: '',
+    admissionNumber: '',
+    courseName: '',
+    branchName: '',
+    year: '',
+    semester: '',
+    batch: '',
+    sdmsPhotoUrl: '',
     gender: 'Male',
     profession: '',
     phoneNumber: '',
@@ -90,6 +101,10 @@ const StaffGuestsManagement = () => {
     photo: null,
     existingPhoto: null
   });
+  const [studentIdentifier, setStudentIdentifier] = useState('');
+  const [studentLookupLoading, setStudentLookupLoading] = useState(false);
+  const [studentLookupError, setStudentLookupError] = useState('');
+  const [studentDataFetched, setStudentDataFetched] = useState(false);
   const [hostels, setHostels] = useState([]);
   const [categories, setCategories] = useState([]);
   const [roomsWithAvailability, setRoomsWithAvailability] = useState([]);
@@ -320,6 +335,86 @@ const StaffGuestsManagement = () => {
     }
   };
 
+  const fetchStudentFromSdms = async () => {
+    const identifier = studentIdentifier.trim();
+    if (!identifier) {
+      setStudentLookupError('Enter a PIN or admission number.');
+      return;
+    }
+
+    setStudentLookupLoading(true);
+    setStudentLookupError('');
+    setStudentDataFetched(false);
+    try {
+      const response = await api.get(`/api/admin/students/fetch-from-sql/${encodeURIComponent(identifier)}`);
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Student was not found in SDMS.');
+      }
+
+      const student = response.data.data;
+      const courseName = student.courseName || student.course || '';
+      const branchName = student.branchName || student.branch || '';
+      const rawPhone = String(student.studentPhone || student.parentPhone || '').replace(/\D/g, '');
+      const phoneNumber = rawPhone.length > 10 ? rawPhone.slice(-10) : rawPhone;
+
+      setFormData(prev => ({
+        ...prev,
+        type: 'student',
+        collegeSource: 'our-college',
+        name: student.name || '',
+        gender: student.gender || 'Other',
+        profession: courseName ? `Student - ${courseName}` : 'Student',
+        phoneNumber,
+        email: student.email || '',
+        department: courseName,
+        collegeName: student.college?.name || '',
+        rollNumber: student.rollNumber || identifier,
+        admissionNumber: student.admissionNumber || '',
+        courseName,
+        branchName,
+        year: student.year ? String(student.year) : '',
+        semester: student.semester || student.rawSQLData?.current_semester || '',
+        batch: student.batch || '',
+        sdmsPhotoUrl: /^https?:\/\//i.test(student.studentPhoto || '') ? student.studentPhoto : ''
+      }));
+      setStudentDataFetched(true);
+    } catch (error) {
+      setStudentLookupError(error.response?.data?.message || error.message || 'Failed to fetch the student from SDMS.');
+    } finally {
+      setStudentLookupLoading(false);
+    }
+  };
+
+  const handleCollegeSourceChange = (event) => {
+    const collegeSource = event.target.value;
+    setStudentLookupError('');
+    setStudentDataFetched(false);
+    if (collegeSource === 'other-college') {
+      setStudentIdentifier('');
+      setFormData(prev => ({
+        ...prev,
+        collegeSource,
+        collegeName: '',
+        rollNumber: '',
+        admissionNumber: '',
+        courseName: '',
+        branchName: '',
+        year: '',
+        semester: '',
+        batch: '',
+        sdmsPhotoUrl: '',
+        name: '',
+        gender: 'Male',
+        profession: '',
+        phoneNumber: '',
+        email: '',
+        department: ''
+      }));
+      return;
+    }
+    setFormData(prev => ({ ...prev, collegeSource }));
+  };
+
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
 
@@ -360,12 +455,25 @@ const StaffGuestsManagement = () => {
 
       console.log('Form data being submitted:', dataToProcess);
       const formDataToSend = new FormData();
+      const studentMetadataFields = [
+        'collegeSource',
+        'collegeName',
+        'rollNumber',
+        'admissionNumber',
+        'courseName',
+        'branchName',
+        'year',
+        'semester',
+        'batch',
+        'sdmsPhotoUrl'
+      ];
       Object.keys(dataToProcess).forEach(key => {
         if (key === 'existingPhoto') {
           // Skip existingPhoto as it's just for display
           return;
         }
-        if (dataToProcess[key] !== null && dataToProcess[key] !== '') {
+        const isStudentMetadata = dataToProcess.type === 'student' && studentMetadataFields.includes(key);
+        if (dataToProcess[key] !== null && (dataToProcess[key] !== '' || isStudentMetadata)) {
           formDataToSend.append(key, dataToProcess[key]);
         }
       });
@@ -398,6 +506,16 @@ const StaffGuestsManagement = () => {
       setFormData({
         name: '',
         type: 'staff',
+        collegeSource: 'other-college',
+        collegeName: '',
+        rollNumber: '',
+        admissionNumber: '',
+        courseName: '',
+        branchName: '',
+        year: '',
+        semester: '',
+        batch: '',
+        sdmsPhotoUrl: '',
         gender: 'Male',
         profession: '',
         phoneNumber: '',
@@ -419,6 +537,9 @@ const StaffGuestsManagement = () => {
         photo: null,
         existingPhoto: null
       });
+      setStudentIdentifier('');
+      setStudentLookupError('');
+      setStudentDataFetched(false);
       fetchStaffGuests();
       fetchStats();
     } catch (error) {
@@ -435,6 +556,16 @@ const StaffGuestsManagement = () => {
     const initialFormData = {
       name: staffGuest.name,
       type: staffGuest.type,
+      collegeSource: staffGuest.collegeSource || 'other-college',
+      collegeName: staffGuest.collegeName || '',
+      rollNumber: staffGuest.rollNumber || '',
+      admissionNumber: staffGuest.admissionNumber || '',
+      courseName: staffGuest.courseName || '',
+      branchName: staffGuest.branchName || '',
+      year: staffGuest.year ? String(staffGuest.year) : '',
+      semester: staffGuest.semester || '',
+      batch: staffGuest.batch || '',
+      sdmsPhotoUrl: staffGuest.sdmsPhotoUrl || '',
       gender: staffGuest.gender,
       profession: staffGuest.profession,
       phoneNumber: staffGuest.phoneNumber,
@@ -458,6 +589,9 @@ const StaffGuestsManagement = () => {
     };
 
     setFormData(initialFormData);
+  setStudentIdentifier(staffGuest.rollNumber || staffGuest.admissionNumber || '');
+  setStudentDataFetched(staffGuest.collegeSource === 'our-college');
+  setStudentLookupError('');
     setShowForm(true);
 
     // Fetch hostels and populate categories/rooms if hostelId exists
@@ -502,6 +636,16 @@ const StaffGuestsManagement = () => {
     setFormData({
       name: '',
       type: 'staff',
+      collegeSource: 'other-college',
+      collegeName: '',
+      rollNumber: '',
+      admissionNumber: '',
+      courseName: '',
+      branchName: '',
+      year: '',
+      semester: '',
+      batch: '',
+      sdmsPhotoUrl: '',
       gender: 'Male',
       profession: '',
       phoneNumber: '',
@@ -523,6 +667,9 @@ const StaffGuestsManagement = () => {
       photo: null,
       existingPhoto: null
     });
+    setStudentIdentifier('');
+    setStudentLookupError('');
+    setStudentDataFetched(false);
     setEditingStaffGuest(null);
     setShowForm(false);
     setRoomsWithAvailability([]);
@@ -1295,9 +1442,9 @@ const StaffGuestsManagement = () => {
                           }}
                         >
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {staffGuest.photo ? (
+                            {staffGuest.photo || staffGuest.sdmsPhotoUrl ? (
                               <img
-                                src={staffGuest.photo}
+                                src={staffGuest.photo || staffGuest.sdmsPhotoUrl}
                                 alt={staffGuest.name}
                                 className="w-10 h-10 rounded-full object-cover"
                               />
@@ -1325,9 +1472,17 @@ const StaffGuestsManagement = () => {
                             {staffGuest.gender}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {staffGuest.profession}
-                            {staffGuest.department && (
-                              <div className="text-xs text-gray-500">{staffGuest.department}</div>
+                            {staffGuest.type === 'student' ? (
+                              <div className="text-xs text-gray-500">
+                                {staffGuest.courseName || staffGuest.department || 'Course not specified'}
+                              </div>
+                            ) : (
+                              <>
+                                {staffGuest.profession}
+                                {staffGuest.department && (
+                                  <div className="text-xs text-gray-500">{staffGuest.department}</div>
+                                )}
+                              </>
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -2061,6 +2216,7 @@ const StaffGuestsManagement = () => {
                           name="name"
                           value={formData.name}
                           onChange={handleInputChange}
+                          readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
                           required
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
@@ -2084,6 +2240,55 @@ const StaffGuestsManagement = () => {
                         </select>
                       </div>
 
+                      {formData.type === 'student' && (
+                        <div className="md:col-span-2 lg:col-span-3 rounded-lg border border-blue-100 bg-blue-50/60 p-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            College Source *
+                          </label>
+                          <select
+                            name="collegeSource"
+                            value={formData.collegeSource}
+                            onChange={handleCollegeSourceChange}
+                            className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="other-college">Other College</option>
+                            <option value="our-college">Our College (SDMS)</option>
+                          </select>
+                          {formData.collegeSource === 'our-college' && (
+                            <div className="mt-3 max-w-xl">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                PIN / Admission Number
+                              </label>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                  type="text"
+                                  value={studentIdentifier}
+                                  onChange={event => setStudentIdentifier(event.target.value)}
+                                  onKeyDown={event => {
+                                    if (event.key === 'Enter') {
+                                      event.preventDefault();
+                                      fetchStudentFromSdms();
+                                    }
+                                  }}
+                                  placeholder="Enter SDMS PIN or admission number"
+                                  className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={fetchStudentFromSdms}
+                                  disabled={studentLookupLoading || !studentIdentifier.trim()}
+                                  className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {studentLookupLoading ? 'Fetching…' : 'Fetch from SDMS'}
+                                </button>
+                              </div>
+                              {studentLookupError && <p className="mt-2 text-sm text-red-600">{studentLookupError}</p>}
+                              {studentDataFetched && <p className="mt-2 text-sm text-green-700">Student details loaded from SDMS.</p>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Gender *
@@ -2092,6 +2297,7 @@ const StaffGuestsManagement = () => {
                           name="gender"
                           value={formData.gender}
                           onChange={handleInputChange}
+                          disabled={studentDataFetched && formData.collegeSource === 'our-college'}
                           required
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         >
@@ -2110,6 +2316,7 @@ const StaffGuestsManagement = () => {
                           name="profession"
                           value={formData.profession}
                           onChange={handleInputChange}
+                          readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
                           required
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
@@ -2124,6 +2331,7 @@ const StaffGuestsManagement = () => {
                           name="phoneNumber"
                           value={formData.phoneNumber}
                           onChange={handleInputChange}
+                          readOnly={studentDataFetched && formData.collegeSource === 'our-college' && !!formData.phoneNumber}
                           required
                           pattern="[0-9]{10}"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2139,6 +2347,7 @@ const StaffGuestsManagement = () => {
                           name="email"
                           value={formData.email}
                           onChange={handleInputChange}
+                          readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>)}
@@ -2153,8 +2362,111 @@ const StaffGuestsManagement = () => {
                             name="department"
                             value={formData.department}
                             onChange={handleInputChange}
+                            readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
+                        </div>
+                      )}
+
+                      {formData.type === 'student' && (
+                        <div className="md:col-span-2 lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 rounded-lg border border-gray-200 p-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">College Name</label>
+                            <input
+                              type="text"
+                              name="collegeName"
+                              value={formData.collegeName}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Roll / PIN Number</label>
+                            <input
+                              type="text"
+                              name="rollNumber"
+                              value={formData.rollNumber}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Admission Number</label>
+                            <input
+                              type="text"
+                              name="admissionNumber"
+                              value={formData.admissionNumber}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Course</label>
+                            <input
+                              type="text"
+                              name="courseName"
+                              value={formData.courseName}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
+                            <input
+                              type="text"
+                              name="branchName"
+                              value={formData.branchName}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                              <input
+                                type="number"
+                                name="year"
+                                min="1"
+                                value={formData.year}
+                                onChange={handleInputChange}
+                                readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
+                              <input
+                                type="text"
+                                name="semester"
+                                value={formData.semester}
+                                onChange={handleInputChange}
+                                readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
+                            <input
+                              type="text"
+                              name="batch"
+                              value={formData.batch}
+                              onChange={handleInputChange}
+                              readOnly={studentDataFetched && formData.collegeSource === 'our-college'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </div>
+                          {formData.sdmsPhotoUrl && (
+                            <div className="flex items-center gap-3">
+                              <img src={formData.sdmsPhotoUrl} alt="SDMS student" className="h-14 w-14 rounded-full object-cover" />
+                              <span className="text-xs text-gray-500">Student photo from SDMS</span>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -2648,16 +2960,16 @@ const StaffGuestsManagement = () => {
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+                className={`bg-white rounded-lg shadow-xl w-full ${selectedStaffGuest.type === 'student' && selectedStaffGuest.collegeSource === 'our-college' ? 'max-w-6xl' : 'max-w-4xl'} max-h-[90vh] overflow-y-auto`}
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="p-6">
                   {/* Header */}
                   <div className="flex justify-between items-start mb-6">
                     <div className="flex items-center gap-4">
-                      {selectedStaffGuest.photo ? (
+                      {selectedStaffGuest.photo || selectedStaffGuest.sdmsPhotoUrl ? (
                         <img
-                          src={selectedStaffGuest.photo}
+                          src={selectedStaffGuest.photo || selectedStaffGuest.sdmsPhotoUrl}
                           alt={selectedStaffGuest.name}
                           className="w-20 h-20 rounded-full object-cover border-4 border-gray-200"
                         />
@@ -2683,7 +2995,7 @@ const StaffGuestsManagement = () => {
                   </div>
 
                   {/* Details Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+                  <div className={`grid grid-cols-1 md:grid-cols-2 ${selectedStaffGuest.type === 'student' && selectedStaffGuest.collegeSource === 'our-college' ? '2xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4 xl:gap-5 mb-6`}>
                     {/* Personal Information */}
                     <div className="bg-gray-50 rounded-lg p-4">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
@@ -2723,6 +3035,32 @@ const StaffGuestsManagement = () => {
                         )}
                       </div>
                     </div>
+
+                    {selectedStaffGuest.type === 'student' && selectedStaffGuest.collegeSource === 'our-college' && (
+                      <div className="bg-blue-50/70 rounded-lg p-4 border border-blue-100">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                          <AcademicCapIcon className="w-5 h-5 mr-2 text-blue-600" />
+                          SDMS Student Information
+                        </h3>
+                        <div className="space-y-3">
+                          {[
+                            ['College', selectedStaffGuest.collegeName],
+                            ['Roll / PIN Number', selectedStaffGuest.rollNumber],
+                            ['Admission Number', selectedStaffGuest.admissionNumber],
+                            ['Course', selectedStaffGuest.courseName],
+                            ['Branch', selectedStaffGuest.branchName],
+                            ['Year', selectedStaffGuest.year],
+                            ['Semester', selectedStaffGuest.semester],
+                            ['Batch', selectedStaffGuest.batch]
+                          ].map(([label, value]) => (
+                            <div key={label}>
+                              <span className="text-sm font-medium text-gray-600">{label}:</span>
+                              <p className="text-sm text-gray-900">{value || 'Not available'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Stay Information */}
                     <div className="bg-gray-50 rounded-lg p-4">

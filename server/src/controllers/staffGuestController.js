@@ -73,6 +73,16 @@ export const addStaffGuest = async (req, res, next) => {
     const {
       name,
       type,
+      collegeSource,
+      collegeName,
+      rollNumber,
+      admissionNumber,
+      courseName,
+      branchName,
+      year,
+      semester,
+      batch,
+      sdmsPhotoUrl,
       gender,
       profession,
       phoneNumber,
@@ -101,6 +111,16 @@ export const addStaffGuest = async (req, res, next) => {
     // Validate type
     if (!['staff', 'guest', 'student', 'warden'].includes(type)) {
       throw createError(400, 'Type must be staff, guest, student, or warden');
+    }
+
+    const studentCollegeSource = collegeSource || 'other-college';
+    if (type === 'student') {
+      if (!['our-college', 'other-college'].includes(studentCollegeSource)) {
+        throw createError(400, 'Select whether the student is from Our College or Other College');
+      }
+      if (collegeSource === 'our-college' && !rollNumber && !admissionNumber) {
+        throw createError(400, 'An SDMS roll number or admission number is required');
+      }
     }
 
     // Validate gender
@@ -215,6 +235,16 @@ export const addStaffGuest = async (req, res, next) => {
     const staffGuest = new StaffGuest({
       name: name.trim(),
       type,
+      collegeSource: type === 'student' ? studentCollegeSource : undefined,
+      collegeName: type === 'student' && collegeName ? collegeName.trim() : undefined,
+      rollNumber: type === 'student' && rollNumber ? rollNumber.trim() : undefined,
+      admissionNumber: type === 'student' && admissionNumber ? admissionNumber.trim() : undefined,
+      courseName: type === 'student' && courseName ? courseName.trim() : undefined,
+      branchName: type === 'student' && branchName ? branchName.trim() : undefined,
+      year: type === 'student' && year ? Number(year) : undefined,
+      semester: type === 'student' && semester ? semester.trim() : undefined,
+      batch: type === 'student' && batch ? batch.trim() : undefined,
+      sdmsPhotoUrl: type === 'student' && sdmsPhotoUrl ? sdmsPhotoUrl : undefined,
       gender,
       profession: profession.trim(),
       phoneNumber: phoneNumber.trim(),
@@ -432,6 +462,16 @@ export const updateStaffGuest = async (req, res, next) => {
     const {
       name,
       type,
+      collegeSource,
+      collegeName,
+      rollNumber,
+      admissionNumber,
+      courseName,
+      branchName,
+      year,
+      semester,
+      batch,
+      sdmsPhotoUrl,
       gender,
       profession,
       phoneNumber,
@@ -469,6 +509,18 @@ export const updateStaffGuest = async (req, res, next) => {
 
     // For staff type, validate stayType
     const currentType = type || staffGuest.type;
+    if (currentType === 'student') {
+      const currentCollegeSource = collegeSource || staffGuest.collegeSource || 'other-college';
+      const currentRollNumber = rollNumber !== undefined ? rollNumber : staffGuest.rollNumber;
+      const currentAdmissionNumber = admissionNumber !== undefined ? admissionNumber : staffGuest.admissionNumber;
+      if (!['our-college', 'other-college'].includes(currentCollegeSource)) {
+        throw createError(400, 'Select whether the student is from Our College or Other College');
+      }
+      if (currentCollegeSource === 'our-college' && !currentRollNumber && !currentAdmissionNumber) {
+        throw createError(400, 'An SDMS roll number or admission number is required');
+      }
+    }
+
     if (currentType === 'staff') {
       const currentStayType = stayType !== undefined ? stayType : staffGuest.stayType;
       if (currentStayType && !['daily', 'monthly'].includes(currentStayType)) {
@@ -619,6 +671,16 @@ export const updateStaffGuest = async (req, res, next) => {
     // Update fields
     if (name) staffGuest.name = name.trim();
     if (type) staffGuest.type = type;
+    if (collegeSource !== undefined) staffGuest.collegeSource = collegeSource || 'other-college';
+    if (collegeName !== undefined) staffGuest.collegeName = collegeName ? collegeName.trim() : undefined;
+    if (rollNumber !== undefined) staffGuest.rollNumber = rollNumber ? rollNumber.trim() : undefined;
+    if (admissionNumber !== undefined) staffGuest.admissionNumber = admissionNumber ? admissionNumber.trim() : undefined;
+    if (courseName !== undefined) staffGuest.courseName = courseName ? courseName.trim() : undefined;
+    if (branchName !== undefined) staffGuest.branchName = branchName ? branchName.trim() : undefined;
+    if (year !== undefined) staffGuest.year = year ? Number(year) : undefined;
+    if (semester !== undefined) staffGuest.semester = semester ? semester.trim() : undefined;
+    if (batch !== undefined) staffGuest.batch = batch ? batch.trim() : undefined;
+    if (sdmsPhotoUrl !== undefined) staffGuest.sdmsPhotoUrl = sdmsPhotoUrl || undefined;
     if (gender) staffGuest.gender = gender;
     if (profession) staffGuest.profession = profession.trim();
     if (phoneNumber) staffGuest.phoneNumber = phoneNumber.trim();
@@ -690,6 +752,19 @@ export const updateStaffGuest = async (req, res, next) => {
       staffGuest.calculatedCharges = staffGuest.calculateCharges(dailyRateSettings.staffDailyRate);
     } else if (currentType === 'guest') {
       staffGuest.calculatedCharges = 0;
+    }
+
+    if (currentType !== 'student') {
+      staffGuest.collegeSource = 'other-college';
+      staffGuest.collegeName = undefined;
+      staffGuest.rollNumber = undefined;
+      staffGuest.admissionNumber = undefined;
+      staffGuest.courseName = undefined;
+      staffGuest.branchName = undefined;
+      staffGuest.year = undefined;
+      staffGuest.semester = undefined;
+      staffGuest.batch = undefined;
+      staffGuest.sdmsPhotoUrl = undefined;
     }
     
     staffGuest.lastModifiedBy = req.admin._id;

@@ -135,7 +135,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         if (onStatsUpdate && response.data.data.statistics) {
           onStatsUpdate({
             totalStudents: stats.totalStudents || 0,
-            attendanceTaken: (stats.morningPresent || 0) + (stats.eveningPresent || 0) + (stats.nightPresent || 0) > 0 ? (stats.fullyPresent || stats.morningPresent || 0) : 0
+            attendanceTaken: (response.data.data.attendance || []).filter(record => record._id).length
           });
         }
       }

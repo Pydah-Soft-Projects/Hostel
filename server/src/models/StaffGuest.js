@@ -11,6 +11,43 @@ const staffGuestSchema = new mongoose.Schema({
     enum: ['staff', 'guest', 'student', 'warden'],
     required: true
   },
+  collegeSource: {
+    type: String,
+    enum: ['our-college', 'other-college'],
+    default: 'other-college'
+  },
+  collegeName: {
+    type: String,
+    trim: true
+  },
+  rollNumber: {
+    type: String,
+    trim: true
+  },
+  admissionNumber: {
+    type: String,
+    trim: true
+  },
+  courseName: {
+    type: String,
+    trim: true
+  },
+  branchName: {
+    type: String,
+    trim: true
+  },
+  year: {
+    type: Number,
+    min: 1
+  },
+  semester: {
+    type: String,
+    trim: true
+  },
+  batch: {
+    type: String,
+    trim: true
+  },
   gender: {
     type: String,
     enum: ['Male', 'Female', 'Other'],
@@ -118,6 +155,10 @@ const staffGuestSchema = new mongoose.Schema({
   },
   photo: {
     type: String, // URL to the uploaded photo
+    default: null
+  },
+  sdmsPhotoUrl: {
+    type: String,
     default: null
   },
   checkInTime: {
