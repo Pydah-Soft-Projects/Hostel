@@ -30,7 +30,9 @@ import {
   CogIcon,
   PrinterIcon,
   CurrencyDollarIcon,
-  DocumentArrowDownIcon
+  DocumentArrowDownIcon,
+  ArrowRightOnRectangleIcon,
+  ArrowLeftOnRectangleIcon
 } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import SEO from '../../components/SEO';
@@ -48,6 +50,8 @@ const StaffGuestsManagement = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedStaffGuest, setSelectedStaffGuest] = useState(null);
   const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [showStudentFeeConfirmModal, setShowStudentFeeConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [renewalForm, setRenewalForm] = useState({
     selectedMonth: '',
     roomNumber: '',
@@ -56,6 +60,12 @@ const StaffGuestsManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterGender, setFilterGender] = useState('all');
+  const [filterCheckInStatus, setFilterCheckInStatus] = useState('all');
+  const [filterChargeType, setFilterChargeType] = useState('all');
+  const [filterChargingBasis, setFilterChargingBasis] = useState('all');
+  const [filterDateRange, setFilterDateRange] = useState('all');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
   const [stats, setStats] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -70,7 +80,8 @@ const StaffGuestsManagement = () => {
   const [formData, setFormData] = useState({
     name: '',
     type: 'staff',
-    collegeSource: 'other-college',
+    entryPricing: 'free', // 'free' or 'charged'
+    collegeSource: 'our-college',
     collegeName: '',
     rollNumber: '',
     admissionNumber: '',
@@ -105,6 +116,12 @@ const StaffGuestsManagement = () => {
   const [studentLookupLoading, setStudentLookupLoading] = useState(false);
   const [studentLookupError, setStudentLookupError] = useState('');
   const [studentDataFetched, setStudentDataFetched] = useState(false);
+  const [hrmsSearchQuery, setHrmsSearchQuery] = useState('');
+  const [hrmsSearching, setHrmsSearching] = useState(false);
+  const [hrmsSearchResults, setHrmsSearchResults] = useState([]);
+  const [hrmsLookupError, setHrmsLookupError] = useState('');
+  const [staffDataFetched, setStaffDataFetched] = useState(false);
+  const [selectedHrmsStaff, setSelectedHrmsStaff] = useState(null);
   const [hostels, setHostels] = useState([]);
   const [categories, setCategories] = useState([]);
   const [roomsWithAvailability, setRoomsWithAvailability] = useState([]);
@@ -146,7 +163,18 @@ const StaffGuestsManagement = () => {
   useEffect(() => {
     fetchStaffGuests();
     fetchStats();
-  }, [currentPage, searchTerm, filterType, filterGender]);
+  }, [
+    currentPage,
+    searchTerm,
+    filterType,
+    filterGender,
+    filterCheckInStatus,
+    filterChargeType,
+    filterChargingBasis,
+    filterDateRange,
+    filterStartDate,
+    filterEndDate
+  ]);
 
   useEffect(() => {
     if (activeTab === 'attendance') {
@@ -261,6 +289,12 @@ const StaffGuestsManagement = () => {
         search: searchTerm,
         type: filterType !== 'all' ? filterType : '',
         gender: filterGender !== 'all' ? filterGender : '',
+        checkInStatus: filterCheckInStatus !== 'all' ? filterCheckInStatus : '',
+        chargeType: filterChargeType !== 'all' ? filterChargeType : '',
+        chargingBasis: filterChargingBasis !== 'all' ? filterChargingBasis : '',
+        dateRange: filterDateRange !== 'all' ? filterDateRange : '',
+        ...(filterDateRange === 'custom' && filterStartDate ? { startDate: filterStartDate } : {}),
+        ...(filterDateRange === 'custom' && filterEndDate ? { endDate: filterEndDate } : {}),
         isActive: 'true'
       });
 
@@ -282,6 +316,19 @@ const StaffGuestsManagement = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setFilterType('all');
+    setFilterGender('all');
+    setFilterCheckInStatus('all');
+    setFilterChargeType('all');
+    setFilterChargingBasis('all');
+    setFilterDateRange('all');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setCurrentPage(1);
   };
 
   const fetchStats = async () => {
@@ -338,7 +385,7 @@ const StaffGuestsManagement = () => {
   const fetchStudentFromSdms = async () => {
     const identifier = studentIdentifier.trim();
     if (!identifier) {
-      setStudentLookupError('Enter a PIN or admission number.');
+      setStudentLookupError('Enter a Student PIN, Roll Number, or Admission Number.');
       return;
     }
 
@@ -346,16 +393,42 @@ const StaffGuestsManagement = () => {
     setStudentLookupError('');
     setStudentDataFetched(false);
     try {
-      const response = await api.get(`/api/admin/students/fetch-from-sql/${encodeURIComponent(identifier)}`);
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'Student was not found in SDMS.');
+      let student = null;
+      let fetched = false;
+
+      // 1. Try central SDMS SQL fetch first
+      try {
+        const response = await api.get(`/api/admin/students/fetch-from-sql/${encodeURIComponent(identifier)}`);
+        if (response.data?.success && response.data?.data) {
+          student = response.data.data;
+          fetched = true;
+        }
+      } catch (sqlErr) {
+        console.warn('Central SDMS SQL lookup failed, falling back to local records:', sqlErr);
       }
 
-      const student = response.data.data;
+      // 2. Fallback to local HMS student search if SQL fails
+      if (!fetched) {
+        try {
+          const searchResp = await api.get(`/api/admin/students/search/${encodeURIComponent(identifier)}`);
+          if (searchResp.data?.success && searchResp.data?.data) {
+            student = searchResp.data.data;
+            fetched = true;
+          }
+        } catch (searchErr) {
+          console.warn('Local student search fallback failed:', searchErr);
+        }
+      }
+
+      if (!fetched || !student) {
+        throw new Error('Student record was not found in SDMS. Please verify the PIN or admission number.');
+      }
+
       const courseName = student.courseName || student.course || '';
       const branchName = student.branchName || student.branch || '';
-      const rawPhone = String(student.studentPhone || student.parentPhone || '').replace(/\D/g, '');
+      const rawPhone = String(student.studentPhone || student.phoneNumber || student.parentPhone || '').replace(/\D/g, '');
       const phoneNumber = rawPhone.length > 10 ? rawPhone.slice(-10) : rawPhone;
+      const photoUrl = student.studentPhoto || student.photo || student.sdmsPhotoUrl || '';
 
       setFormData(prev => ({
         ...prev,
@@ -364,22 +437,25 @@ const StaffGuestsManagement = () => {
         name: student.name || '',
         gender: student.gender || 'Other',
         profession: courseName ? `Student - ${courseName}` : 'Student',
-        phoneNumber,
-        email: student.email || '',
-        department: courseName,
-        collegeName: student.college?.name || '',
+        phoneNumber: phoneNumber || prev.phoneNumber,
+        email: student.email || prev.email,
+        department: courseName || branchName || prev.department,
+        collegeName: student.college?.name || student.collegeName || '',
         rollNumber: student.rollNumber || identifier,
         admissionNumber: student.admissionNumber || '',
         courseName,
         branchName,
         year: student.year ? String(student.year) : '',
-        semester: student.semester || student.rawSQLData?.current_semester || '',
+        semester: student.semester ? String(student.semester) : (student.rawSQLData?.current_semester || ''),
         batch: student.batch || '',
-        sdmsPhotoUrl: /^https?:\/\//i.test(student.studentPhoto || '') ? student.studentPhoto : ''
+        sdmsPhotoUrl: /^https?:\/\//i.test(photoUrl) ? photoUrl : (photoUrl ? photoUrl : '')
       }));
       setStudentDataFetched(true);
+      toast.success(`SDMS record mapped successfully for ${student.name || identifier}`);
     } catch (error) {
-      setStudentLookupError(error.response?.data?.message || error.message || 'Failed to fetch the student from SDMS.');
+      const msg = error.response?.data?.message || error.message || 'Failed to map student from SDMS.';
+      setStudentLookupError(msg);
+      toast.error(msg);
     } finally {
       setStudentLookupLoading(false);
     }
@@ -405,7 +481,7 @@ const StaffGuestsManagement = () => {
         sdmsPhotoUrl: '',
         name: '',
         gender: 'Male',
-        profession: '',
+        profession: 'Student',
         phoneNumber: '',
         email: '',
         department: ''
@@ -415,21 +491,108 @@ const StaffGuestsManagement = () => {
     setFormData(prev => ({ ...prev, collegeSource }));
   };
 
+  const searchHrmsStaff = async (query) => {
+    const q = (query !== undefined ? query : hrmsSearchQuery).trim();
+    if (!q || q.length < 2) {
+      setHrmsSearchResults([]);
+      return;
+    }
+    setHrmsSearching(true);
+    setHrmsLookupError('');
+    try {
+      const response = await api.get('/api/admin-management/hrms-employees/search', {
+        params: { q }
+      });
+      if (response.data?.success && Array.isArray(response.data?.data)) {
+        setHrmsSearchResults(response.data.data);
+        if (response.data.data.length === 0) {
+          setHrmsLookupError('No matching staff records found in HRMS.');
+        }
+      } else {
+        setHrmsSearchResults([]);
+        setHrmsLookupError('No staff records found in HRMS.');
+      }
+    } catch (err) {
+      console.error('Error searching HRMS staff:', err);
+      setHrmsLookupError(err.response?.data?.message || 'Failed to search HRMS staff records.');
+    } finally {
+      setHrmsSearching(false);
+    }
+  };
+
+  const handleSelectHrmsStaff = (emp) => {
+    if (!emp) return;
+    const rawPhone = String(emp.phone || '').replace(/\D/g, '');
+    const phoneNumber = rawPhone.length > 10 ? rawPhone.slice(-10) : rawPhone;
+    const photoUrl = emp.profilePhoto || '';
+
+    setFormData(prev => ({
+      ...prev,
+      name: emp.name || prev.name,
+      gender: ['Male', 'Female', 'Other'].includes(emp.gender) ? emp.gender : (prev.gender || 'Male'),
+      phoneNumber: phoneNumber || prev.phoneNumber,
+      email: emp.email || prev.email,
+      department: emp.department || prev.department,
+      profession: emp.designation || (prev.type === 'warden' ? 'Warden' : 'Staff'),
+      rollNumber: emp.employeeId || prev.rollNumber,
+      existingPhoto: photoUrl || prev.existingPhoto,
+      sdmsPhotoUrl: photoUrl || prev.sdmsPhotoUrl,
+      photo: null
+    }));
+
+    setSelectedHrmsStaff(emp);
+    setStaffDataFetched(true);
+    setHrmsSearchResults([]);
+    setHrmsSearchQuery(emp.name ? `${emp.name} (${emp.employeeId || ''})` : (emp.employeeId || ''));
+    toast.success(`HRMS staff record mapped successfully for ${emp.name || emp.employeeId}`);
+  };
+
+  const clearHrmsStaffSelection = () => {
+    setSelectedHrmsStaff(null);
+    setStaffDataFetched(false);
+    setHrmsSearchQuery('');
+    setHrmsSearchResults([]);
+    setHrmsLookupError('');
+  };
+
+  const handleEntryPricingChange = (pricing) => {
+    setFormData(prev => ({
+      ...prev,
+      entryPricing: pricing,
+      dailyRate: pricing === 'free' ? '' : prev.dailyRate,
+      monthlyFixedAmount: pricing === 'free' ? '' : prev.monthlyFixedAmount
+    }));
+  };
+
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
 
-    // When charge type changes, reset the related fields
-    if (name === 'chargeType') {
+    if (name === 'type') {
+      const isStudent = value === 'student';
+      const isStaffOrWarden = ['staff', 'warden'].includes(value);
+      setFormData(prev => ({
+        ...prev,
+        type: value,
+        collegeSource: isStudent ? 'our-college' : prev.collegeSource,
+        profession: isStudent ? (prev.courseName ? `Student - ${prev.courseName}` : 'Student') : (value === 'warden' ? 'Warden' : (prev.profession === 'Student' ? '' : prev.profession)),
+        photo: null // Reset photo file upload when switching type
+      }));
+      if (isStudent && !studentDataFetched) {
+        setStudentLookupError('');
+      }
+      if (isStaffOrWarden && !staffDataFetched) {
+        setHrmsLookupError('');
+      }
+    } else if (name === 'entryPricing') {
+      handleEntryPricingChange(value);
+    } else if (name === 'chargeType') {
       setFormData(prev => ({
         ...prev,
         [name]: value,
-        // Reset monthlyFixedAmount when switching to per_day
         monthlyFixedAmount: value === 'per_day' ? '' : prev.monthlyFixedAmount,
-        // Reset dailyRate when switching to monthly_fixed (optional, but cleaner)
         dailyRate: value === 'monthly_fixed' ? '' : prev.dailyRate
       }));
     } else if (name === 'stayType' && value === 'monthly') {
-      // When switching to monthly, set current month if not already set
       setFormData(prev => ({
         ...prev,
         [name]: value,
@@ -446,11 +609,39 @@ const StaffGuestsManagement = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canWriteTab('management')) return;
+
+    // When updating/adding a student, open confirmation popup to recheck student details and fee
+    if (formData.type === 'student') {
+      setShowStudentFeeConfirmModal(true);
+      return;
+    }
+
+    await executeSubmit();
+  };
+
+  const executeSubmit = async () => {
+    if (!canWriteTab('management')) return;
     try {
-      // Create a copy and inject defaults for Warden
+      setIsSubmitting(true);
+      // Create a copy and inject defaults for Warden and entry pricing
       const dataToProcess = { ...formData };
       if (dataToProcess.type === 'warden') {
         dataToProcess.profession = 'Warden';
+      }
+
+      if (dataToProcess.entryPricing === 'free') {
+        dataToProcess.dailyRate = '0';
+        dataToProcess.monthlyFixedAmount = '0';
+        dataToProcess.chargeType = 'fixed';
+      } else {
+        if (dataToProcess.chargeType === 'per_day') {
+          dataToProcess.dailyRate = dataToProcess.dailyRate || dailyRateSettings.staffDailyRate || '100';
+          dataToProcess.monthlyFixedAmount = '';
+        } else {
+          dataToProcess.chargeType = 'monthly_fixed';
+          dataToProcess.dailyRate = '';
+          dataToProcess.monthlyFixedAmount = dataToProcess.monthlyFixedAmount || (dataToProcess.stayType === 'monthly' ? (dailyRateSettings.monthlyFixedAmount || '3000') : '0');
+        }
       }
 
       console.log('Form data being submitted:', dataToProcess);
@@ -478,6 +669,17 @@ const StaffGuestsManagement = () => {
         }
       });
 
+      // If photo was not uploaded via file input (students from SDMS or staff from HRMS), attach remote photo URL
+      if (!dataToProcess.photo) {
+        const remotePhotoUrl = dataToProcess.sdmsPhotoUrl || dataToProcess.existingPhoto;
+        if (remotePhotoUrl && typeof remotePhotoUrl === 'string' && /^https?:\/\//i.test(remotePhotoUrl)) {
+          formDataToSend.append('photo', remotePhotoUrl);
+          if (!formDataToSend.has('sdmsPhotoUrl')) {
+            formDataToSend.append('sdmsPhotoUrl', remotePhotoUrl);
+          }
+        }
+      }
+
       // Debug: Log the FormData contents
       console.log('FormData entries:');
       for (let [key, value] of formDataToSend.entries()) {
@@ -491,22 +693,24 @@ const StaffGuestsManagement = () => {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         console.log('Update response:', response.data);
-        toast.success('Staff/Guest updated successfully');
+        toast.success(dataToProcess.type === 'student' ? 'Student updated successfully' : 'Staff/Guest updated successfully');
       } else {
         console.log('Creating new staff/guest');
         const response = await api.post('/api/admin/staff-guests', formDataToSend, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         console.log('Create response:', response.data);
-        toast.success('Staff/Guest added successfully');
+        toast.success(dataToProcess.type === 'student' ? 'Student added successfully' : 'Staff/Guest added successfully');
       }
 
+      setShowStudentFeeConfirmModal(false);
       setShowForm(false);
       setEditingStaffGuest(null);
       setFormData({
         name: '',
         type: 'staff',
-        collegeSource: 'other-college',
+        entryPricing: 'free',
+        collegeSource: 'our-college',
         collegeName: '',
         rollNumber: '',
         admissionNumber: '',
@@ -540,11 +744,19 @@ const StaffGuestsManagement = () => {
       setStudentIdentifier('');
       setStudentLookupError('');
       setStudentDataFetched(false);
+      setHrmsSearchQuery('');
+      setHrmsSearching(false);
+      setHrmsSearchResults([]);
+      setHrmsLookupError('');
+      setStaffDataFetched(false);
+      setSelectedHrmsStaff(null);
       fetchStaffGuests();
       fetchStats();
     } catch (error) {
       console.error('Error saving staff/guest:', error);
       toast.error(error.response?.data?.message || 'Failed to save staff/guest');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -552,11 +764,16 @@ const StaffGuestsManagement = () => {
     if (!canWriteTab('management')) return;
     setEditingStaffGuest(staffGuest);
 
+    const isFree = staffGuest.entryPricing === 'free' ||
+      (staffGuest.type === 'guest' && !staffGuest.dailyRate && !staffGuest.monthlyFixedAmount && (!staffGuest.calculatedCharges || staffGuest.calculatedCharges === 0)) ||
+      (staffGuest.dailyRate === 0 && (!staffGuest.monthlyFixedAmount || staffGuest.monthlyFixedAmount === 0) && (!staffGuest.calculatedCharges || staffGuest.calculatedCharges === 0));
+
     // Populate form with existing data
     const initialFormData = {
       name: staffGuest.name,
       type: staffGuest.type,
-      collegeSource: staffGuest.collegeSource || 'other-college',
+      entryPricing: isFree ? 'free' : 'charged',
+      collegeSource: staffGuest.collegeSource || (staffGuest.type === 'student' ? 'our-college' : 'other-college'),
       collegeName: staffGuest.collegeName || '',
       rollNumber: staffGuest.rollNumber || '',
       admissionNumber: staffGuest.admissionNumber || '',
@@ -588,10 +805,23 @@ const StaffGuestsManagement = () => {
       existingPhoto: staffGuest.photo // Keep existing photo URL
     };
 
+    const hasPhotoUrl = staffGuest.photo || staffGuest.sdmsPhotoUrl || null;
     setFormData(initialFormData);
-  setStudentIdentifier(staffGuest.rollNumber || staffGuest.admissionNumber || '');
-  setStudentDataFetched(staffGuest.collegeSource === 'our-college');
-  setStudentLookupError('');
+    if (staffGuest.type === 'student') {
+      setStudentIdentifier(staffGuest.rollNumber || staffGuest.admissionNumber || '');
+      setStudentDataFetched(staffGuest.collegeSource === 'our-college');
+      setStudentLookupError('');
+    } else if (['staff', 'warden'].includes(staffGuest.type)) {
+      setHrmsSearchQuery(staffGuest.name ? `${staffGuest.name} (${staffGuest.rollNumber || ''})` : (staffGuest.rollNumber || ''));
+      setStaffDataFetched(!!staffGuest.rollNumber);
+      setSelectedHrmsStaff(staffGuest.rollNumber ? {
+        name: staffGuest.name,
+        employeeId: staffGuest.rollNumber,
+        designation: staffGuest.profession,
+        department: staffGuest.department,
+        profilePhoto: hasPhotoUrl
+      } : null);
+    }
     setShowForm(true);
 
     // Fetch hostels and populate categories/rooms if hostelId exists
@@ -626,6 +856,7 @@ const StaffGuestsManagement = () => {
       await api.post(`/api/admin/staff-guests/${id}/checkin-out`, { action });
       toast.success(`Staff/Guest ${action === 'checkin' ? 'checked in' : 'checked out'} successfully`);
       fetchStaffGuests();
+      fetchStats();
     } catch (error) {
       console.error('Error checking in/out:', error);
       toast.error('Failed to check in/out staff/guest');
@@ -636,7 +867,8 @@ const StaffGuestsManagement = () => {
     setFormData({
       name: '',
       type: 'staff',
-      collegeSource: 'other-college',
+      entryPricing: 'free',
+      collegeSource: 'our-college',
       collegeName: '',
       rollNumber: '',
       admissionNumber: '',
@@ -670,8 +902,15 @@ const StaffGuestsManagement = () => {
     setStudentIdentifier('');
     setStudentLookupError('');
     setStudentDataFetched(false);
+    setHrmsSearchQuery('');
+    setHrmsSearching(false);
+    setHrmsSearchResults([]);
+    setHrmsLookupError('');
+    setStaffDataFetched(false);
+    setSelectedHrmsStaff(null);
     setEditingStaffGuest(null);
     setShowForm(false);
+    setShowStudentFeeConfirmModal(false);
     setRoomsWithAvailability([]);
     setCategories([]);
   };
@@ -846,6 +1085,89 @@ const StaffGuestsManagement = () => {
     return Math.floor(timeDiff / MS_PER_DAY) + 1;
   };
 
+  const isStaffGuestFree = (sg) => {
+    if (!sg) return false;
+    if (sg.entryPricing === 'free') return true;
+    if (sg.type === 'guest' && !sg.dailyRate && !sg.monthlyFixedAmount && (!sg.calculatedCharges || sg.calculatedCharges === 0)) return true;
+    if (sg.dailyRate === 0 && (!sg.monthlyFixedAmount || sg.monthlyFixedAmount === 0) && (!sg.calculatedCharges || sg.calculatedCharges === 0)) return true;
+    return false;
+  };
+
+  const getDisplayCharge = (sg) => {
+    if (!sg || isStaffGuestFree(sg)) return 0;
+    if (typeof sg.calculatedCharges === 'number' && sg.calculatedCharges > 0) {
+      return sg.calculatedCharges;
+    }
+    if (['monthly_fixed', 'fixed_rate', 'fixed'].includes(sg.chargeType)) {
+      return sg.monthlyFixedAmount || 0;
+    }
+    const rate = sg.dailyRate || dailyRateSettings.staffDailyRate || 100;
+    let days = 0;
+    if (sg.stayType === 'monthly' && sg.selectedMonth) {
+      const [year, month] = sg.selectedMonth.split('-').map(Number);
+      days = new Date(year, month, 0).getDate();
+    } else if (sg.checkinDate) {
+      days = calculateStayDays(sg.checkinDate, sg.checkoutDate);
+    }
+    return days * rate;
+  };
+
+  const calculatePreviewCharges = () => {
+    if (formData.entryPricing === 'free') return 0;
+
+    const isFixed = ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType);
+    if (isFixed) {
+      if (formData.monthlyFixedAmount !== '' && formData.monthlyFixedAmount !== null) {
+        return parseFloat(formData.monthlyFixedAmount) || 0;
+      }
+      if (formData.type === 'staff' && formData.stayType === 'monthly') {
+        return parseFloat(dailyRateSettings.monthlyFixedAmount) || 3000;
+      }
+      return 0;
+    }
+
+    const rateToUse = formData.dailyRate !== '' && formData.dailyRate !== null
+      ? parseFloat(formData.dailyRate)
+      : (parseFloat(dailyRateSettings.staffDailyRate) || 100);
+
+    if (formData.type === 'staff' && formData.stayType === 'monthly' && formData.selectedMonth) {
+      const [year, month] = formData.selectedMonth.split('-').map(Number);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      return daysInMonth * rateToUse;
+    }
+
+    if (formData.checkinDate) {
+      const dayCount = calculateStayDays(formData.checkinDate, formData.checkoutDate);
+      return dayCount * rateToUse;
+    }
+
+    return 0;
+  };
+
+  const getCalculationBreakdownText = () => {
+    if (formData.entryPricing === 'free') {
+      return 'Free entry (₹0 charges - checked in without charges)';
+    }
+    const isFixed = ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType);
+    if (isFixed) {
+      return 'Fixed charge lump sum for stay period / month';
+    }
+    const rateToUse = formData.dailyRate !== '' && formData.dailyRate !== null
+      ? parseFloat(formData.dailyRate)
+      : (parseFloat(dailyRateSettings.staffDailyRate) || 100);
+
+    if (formData.type === 'staff' && formData.stayType === 'monthly' && formData.selectedMonth) {
+      const [year, month] = formData.selectedMonth.split('-').map(Number);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      return `${daysInMonth} days in month × ₹${rateToUse}/day`;
+    }
+    if (formData.checkinDate) {
+      const dayCount = calculateStayDays(formData.checkinDate, formData.checkoutDate);
+      return `${dayCount} days stay × ₹${rateToUse}/day`;
+    }
+    return 'Enter check-in date or month to calculate';
+  };
+
   // Helper function to format date as dd/mm/yyyy
   const formatDateDDMMYYYY = (date) => {
     if (!date) return 'N/A';
@@ -892,7 +1214,7 @@ const StaffGuestsManagement = () => {
       console.log('Generating PDF for staff/guest:', staffGuest);
 
       // Pre-load photo if it's a URL and convert to base64
-      let photoData = staffGuest.photo;
+      let photoData = staffGuest.photo || staffGuest.sdmsPhotoUrl;
       if (photoData && (photoData.startsWith('http') || photoData.startsWith('https'))) {
         try {
           console.log('Loading photo from URL:', photoData);
@@ -942,27 +1264,24 @@ const StaffGuestsManagement = () => {
           throw new Error('Invalid staffGuest object provided to generateOneCopy');
         }
 
-        // For guests, charges are always 0
-        const isGuest = staffGuestWithPhoto.type === 'guest';
-        const dailyRate = isGuest ? 0 : (staffGuestWithPhoto.dailyRate || dailyRateSettings.staffDailyRate || 100);
+        const isFree = isStaffGuestFree(staffGuestWithPhoto);
+        const dailyRate = isFree ? 0 : (staffGuestWithPhoto.dailyRate || dailyRateSettings.staffDailyRate || 100);
 
-        // Calculate day count - for monthly staff, calculate days in the selected month
+        // Calculate day count
         let dayCount = 0;
-        if (!isGuest) {
-          if (staffGuestWithPhoto.stayType === 'monthly' && staffGuestWithPhoto.selectedMonth) {
-            const [year, month] = staffGuestWithPhoto.selectedMonth.split('-').map(Number);
-            dayCount = new Date(year, month, 0).getDate(); // Days in the selected month
-          } else if (staffGuestWithPhoto.checkinDate) {
-            dayCount = calculateStayDays(
-              staffGuestWithPhoto.checkinDate,
-              staffGuestWithPhoto.checkoutDate
-            );
-          }
+        if (staffGuestWithPhoto.stayType === 'monthly' && staffGuestWithPhoto.selectedMonth) {
+          const [year, month] = staffGuestWithPhoto.selectedMonth.split('-').map(Number);
+          dayCount = new Date(year, month, 0).getDate(); // Days in the selected month
+        } else if (staffGuestWithPhoto.checkinDate) {
+          dayCount = calculateStayDays(
+            staffGuestWithPhoto.checkinDate,
+            staffGuestWithPhoto.checkoutDate
+          );
         }
 
         const isFixed = ['monthly_fixed', 'fixed_rate', 'fixed'].includes(staffGuestWithPhoto.chargeType);
-        const totalCharges = isGuest ? 0 : (isFixed ? (staffGuestWithPhoto.monthlyFixedAmount || staffGuestWithPhoto.calculatedCharges || 0) : (dailyRate * dayCount));
-        const actualCharges = isGuest ? 0 : (staffGuestWithPhoto.calculatedCharges || totalCharges);
+        const totalCharges = isFree ? 0 : (isFixed ? (staffGuestWithPhoto.monthlyFixedAmount || getDisplayCharge(staffGuestWithPhoto) || 0) : (dailyRate * dayCount));
+        const actualCharges = isFree ? 0 : (getDisplayCharge(staffGuestWithPhoto) || totalCharges);
         const staffGender = staffGuestWithPhoto.gender?.toLowerCase();
         const hostelName = staffGender === 'female' ? 'Girls Hostel' : 'Boys Hostel';
 
@@ -1059,11 +1378,10 @@ const StaffGuestsManagement = () => {
         doc.setFont('helvetica', 'bold');
         doc.text('CHARGES SUMMARY:', chargesSummaryX, emergencyY);
 
-        if (isGuest) {
-          // For guests, show no charges
+        if (isFree) {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(7);
-          doc.text(`No charges for guests`, chargesSummaryX, emergencyY + 5);
+          doc.text(`Entry: Free Entry (No charges)`, chargesSummaryX, emergencyY + 5);
           doc.setFont('helvetica', 'bold');
           doc.text(`Total Payable: Rs.0`, chargesSummaryX, emergencyY + 10);
         } else if (isFixed) {
@@ -1330,81 +1648,400 @@ const StaffGuestsManagement = () => {
         {/* Management Tab Content */}
         {activeTab === 'management' && (
           <>
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-              <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
+            {/* 1. Check-In & Check-Out Summary Cards */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                  <ClockIcon className="w-4 h-4 text-indigo-600" />
+                  Check-In & Check-Out Summary
+                </h3>
+                <span className="text-xs text-gray-500 font-medium">Live Attendance & Headcount</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Total Checked In */}
+                <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-4 border-l-4 border-l-emerald-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total Checked In</p>
+                      <p className="text-2xl font-extrabold text-emerald-950 mt-1">
+                        {(stats.totalCheckedIn !== undefined ? stats.totalCheckedIn : staffGuests.filter(sg => sg.checkInTime).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                      <ArrowRightOnRectangleIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <CheckCircleIcon className="w-3.5 h-3.5 text-emerald-500" />
+                    Total people who have checked in
+                  </p>
+                </div>
+
+                {/* 2. Total Checked Out */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 border-l-4 border-l-slate-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total Checked Out</p>
+                      <p className="text-2xl font-extrabold text-slate-900 mt-1">
+                        {(stats.totalCheckedOut !== undefined ? stats.totalCheckedOut : staffGuests.filter(sg => sg.checkOutTime).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-slate-100 rounded-xl text-slate-600">
+                      <ArrowLeftOnRectangleIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <CheckCircleIcon className="w-3.5 h-3.5 text-slate-500" />
+                    Completed their check-out
+                  </p>
+                </div>
+
+                {/* 3. Currently Inside */}
+                <div className="bg-white rounded-xl shadow-sm border border-indigo-100 p-4 border-l-4 border-l-indigo-600 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Currently Inside</p>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 animate-pulse">
+                          Live
+                        </span>
+                      </div>
+                      <p className="text-2xl font-extrabold text-indigo-950 mt-1">
+                        {(stats.currentlyInside !== undefined ? stats.currentlyInside : staffGuests.filter(sg => sg.checkInTime && !sg.checkOutTime).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600">
+                      <BuildingOfficeIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <UserIcon className="w-3.5 h-3.5 text-indigo-500" />
+                    Checked in & not yet checked out
+                  </p>
+                </div>
+
+                {/* 4. Today's Check-Ins */}
+                <div className="bg-white rounded-xl shadow-sm border border-cyan-100 p-4 border-l-4 border-l-cyan-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Today's Check-Ins</p>
+                      <p className="text-2xl font-extrabold text-cyan-950 mt-1">
+                        {(stats.todayCheckIns !== undefined ? stats.todayCheckIns : staffGuests.filter(sg => {
+                          if (!sg.checkInTime) return false;
+                          return new Date(sg.checkInTime).toDateString() === new Date().toDateString();
+                        }).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-cyan-50 rounded-xl text-cyan-600">
+                      <CalendarIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <ClockIcon className="w-3.5 h-3.5 text-cyan-500" />
+                    New check-ins recorded today
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Free & Charged Summary Cards */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                  <CurrencyDollarIcon className="w-4 h-4 text-emerald-600" />
+                  Free & Charged Summary
+                </h3>
+                <span className="text-xs text-gray-500 font-medium">Pricing & Billing Breakdown</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Free Entries */}
+                <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-4 border-l-4 border-l-emerald-600 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Free Entries</p>
+                      <p className="text-2xl font-extrabold text-emerald-950 mt-1">
+                        {(stats.freeEntries !== undefined ? stats.freeEntries : staffGuests.filter(isStaffGuestFree).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
+                      <CheckCircleIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                    Total number of free check-ins
+                  </p>
+                </div>
+
+                {/* 2. Charged Entries */}
+                <div className="bg-white rounded-xl shadow-sm border border-amber-100 p-4 border-l-4 border-l-amber-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Charged Entries</p>
+                      <p className="text-2xl font-extrabold text-amber-950 mt-1">
+                        {(stats.chargedEntries !== undefined ? stats.chargedEntries : staffGuests.filter(s => !isStaffGuestFree(s)).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-amber-50 rounded-xl text-amber-600">
+                      <CurrencyDollarIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <CurrencyDollarIcon className="w-3.5 h-3.5 text-amber-500" />
+                    Check-ins under charged category
+                  </p>
+                </div>
+
+                {/* 3. Per-Day Charges */}
+                <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-4 border-l-4 border-l-blue-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Per-Day Charges</p>
+                      <p className="text-2xl font-extrabold text-blue-950 mt-1">
+                        {(stats.perDayCharges !== undefined ? stats.perDayCharges : staffGuests.filter(s => !isStaffGuestFree(s) && (s.chargeType === 'per_day' || (!s.chargeType && s.dailyRate > 0))).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
+                      <ClockIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <ClockIcon className="w-3.5 h-3.5 text-blue-500" />
+                    Entries using per-day option
+                  </p>
+                </div>
+
+                {/* 4. Fixed Charges */}
+                <div className="bg-white rounded-xl shadow-sm border border-purple-100 p-4 border-l-4 border-l-purple-500 hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Fixed Charges</p>
+                      <p className="text-2xl font-extrabold text-purple-950 mt-1">
+                        {(stats.fixedCharges !== undefined ? stats.fixedCharges : staffGuests.filter(s => !isStaffGuestFree(s) && (['monthly_fixed', 'fixed_rate', 'fixed'].includes(s.chargeType) || s.monthlyFixedAmount > 0 || s.stayType === 'monthly')).length) || 0}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-purple-50 rounded-xl text-purple-600">
+                      <DocumentTextIcon className="w-6 h-6" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                    <DocumentTextIcon className="w-3.5 h-3.5 text-purple-500" />
+                    Entries using fixed-charge option
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Category Breakdown Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-blue-500">
                 <div className="flex items-center gap-2">
                   <UserIcon className="w-5 h-5 text-blue-600" />
                   <span className="text-sm font-medium text-gray-600">Total Staff</span>
                 </div>
                 <div className="text-2xl font-bold text-blue-900">{stats.totalStaff || 0}</div>
               </div>
-              <div className="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
+              <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-green-500">
                 <div className="flex items-center gap-2">
                   <UserIcon className="w-5 h-5 text-green-600" />
                   <span className="text-sm font-medium text-gray-600">Total Guests</span>
                 </div>
                 <div className="text-2xl font-bold text-green-900">{stats.totalGuests || 0}</div>
               </div>
-              <div className="bg-white rounded-lg shadow p-4 border-l-4 border-indigo-500">
+              <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-indigo-500">
                 <div className="flex items-center gap-2">
                   <UserIcon className="w-5 h-5 text-indigo-600" />
                   <span className="text-sm font-medium text-gray-600">Total Students</span>
                 </div>
                 <div className="text-2xl font-bold text-indigo-900">{stats.totalStudents || 0}</div>
               </div>
-              <div className="bg-white rounded-lg shadow p-4 border-l-4 border-yellow-500">
-                <div className="flex items-center gap-2">
-                  <CheckCircleIcon className="w-5 h-5 text-yellow-600" />
-                  <span className="text-sm font-medium text-gray-600">Checked In</span>
-                </div>
-                <div className="text-2xl font-bold text-yellow-900">{stats.totalCheckedIn || 0}</div>
-              </div>
-              <div className="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
+              <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-purple-500">
                 <div className="flex items-center gap-2">
                   <UserIcon className="w-5 h-5 text-purple-600" />
-                  <span className="text-sm font-medium text-gray-600">Total Active</span>
+                  <span className="text-sm font-medium text-gray-600">Total Registered</span>
                 </div>
-                <div className="text-2xl font-bold text-purple-900">{stats.totalActive || 0}</div>
+                <div className="text-2xl font-bold text-purple-900">{stats.totalRegistered || (stats.totalStaff || 0) + (stats.totalGuests || 0) + (stats.totalStudents || 0)}</div>
               </div>
             </div>
 
-            {/* Filters */}
-            <div className="bg-white rounded-lg shadow p-4 mb-6">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            {/* 3. Filters for Staff & Guest Management */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6 space-y-3">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <FunnelIcon className="w-4 h-4 text-indigo-600" />
+                  <span className="text-sm font-bold text-gray-900">Filters & Search</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
+                >
+                  Reset All Filters
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative">
+                <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by name, student ID, staff ID, or guest details..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full pl-10 pr-10 py-2.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50/50 focus:bg-white transition-all"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setCurrentPage(1);
+                    }}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <XMarkIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+
+              
+
+              {/* Filter Dropdowns Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-1">
+                {/* 1. Person Type */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Person Type
+                  </label>
+                  <select
+                    value={filterType}
+                    onChange={(e) => {
+                      setFilterType(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Person Types</option>
+                    <option value="student">Student</option>
+                    <option value="staff">Staff</option>
+                    <option value="guest">Guest</option>
+                    <option value="warden">Warden</option>
+                  </select>
+                </div>
+
+                {/* 2. Check-In Status */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Check-In Status
+                  </label>
+                  <select
+                    value={filterCheckInStatus}
+                    onChange={(e) => {
+                      setFilterCheckInStatus(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="checked_in">Checked In</option>
+                    <option value="checked_out">Checked Out</option>
+                  </select>
+                </div>
+
+                {/* 3. Charge Type */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Charge Type
+                  </label>
+                  <select
+                    value={filterChargeType}
+                    onChange={(e) => {
+                      setFilterChargeType(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Charge Types</option>
+                    <option value="free">Free</option>
+                    <option value="charged">Charged</option>
+                  </select>
+                </div>
+
+                {/* 4. Charging Basis */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Charging Basis
+                  </label>
+                  <select
+                    value={filterChargingBasis}
+                    onChange={(e) => {
+                      setFilterChargingBasis(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Charging Basis</option>
+                    <option value="per_day">Per Day</option>
+                    <option value="fixed">Fixed Charge</option>
+                    <option value="monthly">Monthly Basis</option>
+                  </select>
+                </div>
+
+                {/* 5. Date Range */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Date Range
+                  </label>
+                  <select
+                    value={filterDateRange}
+                    onChange={(e) => {
+                      setFilterDateRange(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Dates</option>
+                    <option value="today">Today</option>
+                    <option value="this_week">This Week</option>
+                    <option value="this_month">This Month</option>
+                    <option value="custom">Custom Range</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Custom Date Inputs if Custom Range is Selected */}
+              {filterDateRange === 'custom' && (
+                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-gray-600">From:</label>
                     <input
-                      type="text"
-                      placeholder="Search by name, profession, phone..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      type="date"
+                      value={filterStartDate}
+                      onChange={(e) => {
+                        setFilterStartDate(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-gray-600">To:</label>
+                    <input
+                      type="date"
+                      value={filterEndDate}
+                      onChange={(e) => {
+                        setFilterEndDate(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                 </div>
-                <select
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="all">All Types</option>
-                  <option value="staff">Staff</option>
-                  <option value="guest">Guest</option>
-                  <option value="student">Student</option>
-                </select>
-                <select
-                  value={filterGender}
-                  onChange={(e) => setFilterGender(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="all">All Genders</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
+              )}
             </div>
 
             {/* Staff/Guests List */}
@@ -1522,11 +2159,20 @@ const StaffGuestsManagement = () => {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <span className="font-medium text-green-600">
-                              ₹{typeof staffGuest.calculatedCharges === 'number'
-                                ? staffGuest.calculatedCharges.toLocaleString('en-IN')
-                                : (staffGuest.calculatedCharges || 0)}
-                            </span>
+                            {isStaffGuestFree(staffGuest) ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Free (₹0)
+                              </span>
+                            ) : (
+                              <div>
+                                <span className="font-semibold text-gray-900">
+                                  ₹{getDisplayCharge(staffGuest).toLocaleString('en-IN')}
+                                </span>
+                                <span className="block text-[11px] text-gray-500">
+                                  {['monthly_fixed', 'fixed_rate', 'fixed'].includes(staffGuest.chargeType) ? 'Fixed' : 'Per Day'}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {(() => {
@@ -1877,11 +2523,15 @@ const StaffGuestsManagement = () => {
                             {staffGuest.checkinDate ? new Date(staffGuest.checkinDate).toLocaleDateString() : 'N/A'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <span className="font-medium text-green-600">
-                              ₹{typeof staffGuest.calculatedCharges === 'number'
-                                ? staffGuest.calculatedCharges.toLocaleString('en-IN')
-                                : (staffGuest.calculatedCharges || 0)}
-                            </span>
+                            {isStaffGuestFree(staffGuest) ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Free (₹0)
+                              </span>
+                            ) : (
+                              <span className="font-medium text-green-600">
+                                ₹{getDisplayCharge(staffGuest).toLocaleString('en-IN')}
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <button
@@ -2034,28 +2684,24 @@ const StaffGuestsManagement = () => {
                         {/* Charges Summary */}
                         <div className="mt-4">
                           <h4 className="text-sm font-bold text-gray-800 mb-2">CHARGES SUMMARY:</h4>
-                          {admitCardData.type === 'guest' ? (
+                          {isStaffGuestFree(admitCardData) ? (
                             <div className="text-xs text-gray-700 space-y-1">
-                              <p>• No charges for guests</p>
-                              <p className="font-bold">• Total Payable: ₹0</p>
+                              <p>• Entry: Free Entry (No charges)</p>
+                              <p className="font-bold text-emerald-700">• Total Payable: ₹0</p>
                             </div>
                           ) : ['monthly_fixed', 'fixed_rate', 'fixed'].includes(admitCardData.chargeType) ? (
                             <div className="text-xs text-gray-700 space-y-1">
                               <p>• Charge Type: Fixed Rate</p>
-                              <p>• Fixed Amount: ₹{(admitCardData.monthlyFixedAmount || admitCardData.calculatedCharges || 0).toLocaleString('en-IN')}</p>
+                              <p>• Fixed Amount: ₹{(admitCardData.monthlyFixedAmount || getDisplayCharge(admitCardData) || 0).toLocaleString('en-IN')}</p>
                               <p>• Stay Duration: {admitCardData.dayCount || 0} days</p>
-                              <p className="font-bold">• Total Payable: ₹{typeof admitCardData.calculatedCharges === 'number'
-                                ? admitCardData.calculatedCharges.toLocaleString('en-IN')
-                                : (admitCardData.calculatedCharges || 0)}</p>
+                              <p className="font-bold">• Total Payable: ₹{getDisplayCharge(admitCardData).toLocaleString('en-IN')}</p>
                             </div>
                           ) : (
                             <div className="text-xs text-gray-700 space-y-1">
                               <p>• Daily Rate: ₹{admitCardData.dailyRate || dailyRateSettings.staffDailyRate || 100} per day</p>
                               <p>• Stay Duration: {admitCardData.dayCount || 0} days</p>
                               <p>• Base Amount: ₹{(admitCardData.dailyRate || dailyRateSettings.staffDailyRate || 100) * (admitCardData.dayCount || 0)}</p>
-                              <p className="font-bold">• Total Payable: ₹{typeof admitCardData.calculatedCharges === 'number'
-                                ? admitCardData.calculatedCharges.toLocaleString('en-IN')
-                                : (admitCardData.calculatedCharges || 0)}</p>
+                              <p className="font-bold">• Total Payable: ₹{getDisplayCharge(admitCardData).toLocaleString('en-IN')}</p>
                             </div>
                           )}
                         </div>
@@ -2206,7 +2852,320 @@ const StaffGuestsManagement = () => {
                   </div>
 
                   <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* 1. Free or Charged Entry Selection */}
+                    <div className="bg-gray-50/80 rounded-xl p-4 border border-gray-200">
+                      <label className="block text-sm font-bold text-gray-800 mb-2">
+                        1. Select Entry Billing Mode *
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div
+                          onClick={() => handleEntryPricingChange('free')}
+                          className={`cursor-pointer rounded-xl p-3.5 border-2 transition-all flex items-start gap-3 select-none ${
+                            formData.entryPricing === 'free'
+                              ? 'border-emerald-500 bg-emerald-50/90 ring-2 ring-emerald-200 shadow-sm'
+                              : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg mt-0.5 ${formData.entryPricing === 'free' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            <CheckCircleIcon className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-gray-900 text-sm">Free Entry</span>
+                              {formData.entryPricing === 'free' && (
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800">
+                                  Selected (₹0)
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                              Checked in without any charges. No stay fee will be charged (₹0).
+                            </p>
+                          </div>
+                        </div>
+
+                        <div
+                          onClick={() => handleEntryPricingChange('charged')}
+                          className={`cursor-pointer rounded-xl p-3.5 border-2 transition-all flex items-start gap-3 select-none ${
+                            formData.entryPricing === 'charged'
+                              ? 'border-blue-600 bg-blue-50/90 ring-2 ring-blue-200 shadow-sm'
+                              : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg mt-0.5 ${formData.entryPricing === 'charged' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                            <CurrencyDollarIcon className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-gray-900 text-sm">Charged Entry</span>
+                              {formData.entryPricing === 'charged' && (
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-200 text-blue-800">
+                                  Charges Apply
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                              Apply charges via Per Day Rate or Fixed Charge (Daily/Monthly for staff).
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Type *
+                        </label>
+                        <select
+                          name="type"
+                          value={formData.type}
+                          onChange={handleInputChange}
+                          required
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+                        >
+                          <option value="staff">Staff</option>
+                          <option value="guest">Guest</option>
+                          <option value="student">Student</option>
+                          <option value="warden">Warden</option>
+                        </select>
+                      </div>
+
+                      {/* When Staff or Warden is selected, show HRMS staff mapping */}
+                      {['staff', 'warden'].includes(formData.type) && (
+                        <div className="md:col-span-2 lg:col-span-3 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50/80 via-blue-50/40 to-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-sm font-bold text-sky-900 flex items-center gap-2">
+                              <BuildingOfficeIcon className="w-5 h-5 text-sky-600" />
+                              Map Staff Record with HRMS *
+                            </label>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                              HRMS Database
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 mb-3">
+                            Search and select a staff member by Employee ID, Name, Phone, or Email to automatically map their details and photo from HRMS.
+                          </p>
+
+                          {selectedHrmsStaff ? (
+                            <div className="flex items-center justify-between gap-3 p-3 bg-white rounded-lg border border-sky-200 shadow-sm">
+                              <div className="flex items-center gap-3">
+                                {selectedHrmsStaff.profilePhoto || formData.existingPhoto || formData.sdmsPhotoUrl ? (
+                                  <img
+                                    src={selectedHrmsStaff.profilePhoto || formData.existingPhoto || formData.sdmsPhotoUrl}
+                                    alt={selectedHrmsStaff.name}
+                                    className="w-12 h-12 rounded-full object-cover border border-sky-200"
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center text-sm border border-sky-200">
+                                    {(selectedHrmsStaff.name || 'S').charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-bold text-gray-900">{selectedHrmsStaff.name}</p>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700">
+                                      {selectedHrmsStaff.label || 'HRMS Employee'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 mt-0.5">
+                                    {selectedHrmsStaff.employeeId ? `Emp ID: ${selectedHrmsStaff.employeeId}` : ''}
+                                    {selectedHrmsStaff.designation ? ` • ${selectedHrmsStaff.designation}` : ''}
+                                    {selectedHrmsStaff.department ? ` • ${selectedHrmsStaff.department}` : ''}
+                                  </p>
+                                  <p className="text-[11px] text-emerald-600 font-medium flex items-center gap-1 mt-0.5">
+                                    <CheckCircleIcon className="w-3.5 h-3.5" /> Mapped with HRMS • Photo synced
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={clearHrmsStaffSelection}
+                                className="text-xs text-red-600 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                              >
+                                Change
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                  <input
+                                    type="text"
+                                    value={hrmsSearchQuery}
+                                    onChange={(e) => {
+                                      setHrmsSearchQuery(e.target.value);
+                                      if (e.target.value.trim().length >= 2) {
+                                        searchHrmsStaff(e.target.value);
+                                      } else {
+                                        setHrmsSearchResults([]);
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        searchHrmsStaff();
+                                      }
+                                    }}
+                                    placeholder="Search by Employee ID, Name, Phone, or Email..."
+                                    className="w-full pl-9 pr-3 py-2 border border-sky-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm bg-white"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => searchHrmsStaff()}
+                                  disabled={hrmsSearching || !hrmsSearchQuery.trim()}
+                                  className="px-4 py-2 rounded-lg bg-sky-600 text-white font-medium hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm transition-all"
+                                >
+                                  {hrmsSearching ? (
+                                    <>
+                                      <LoadingSpinner size="sm" />
+                                      <span>Searching...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <MagnifyingGlassIcon className="w-4 h-4" />
+                                      <span>Fetch HRMS</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+
+                              {hrmsLookupError && (
+                                <p className="mt-2 text-xs font-medium text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                                  {hrmsLookupError}
+                                </p>
+                              )}
+
+                              {/* Search results dropdown */}
+                              {hrmsSearchResults.length > 0 && (
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                  {hrmsSearchResults.map((emp) => (
+                                    <button
+                                      key={`${emp.linkType}_${emp.recordId || emp.employeeId}`}
+                                      type="button"
+                                      onClick={() => handleSelectHrmsStaff(emp)}
+                                      className="w-full text-left px-3.5 py-2.5 hover:bg-sky-50 border-b border-gray-100 last:border-b-0 flex items-center justify-between gap-3 transition-colors"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        {emp.profilePhoto ? (
+                                          <img
+                                            src={emp.profilePhoto}
+                                            alt={emp.name}
+                                            className="w-9 h-9 rounded-full object-cover border border-gray-200 flex-shrink-0"
+                                            onError={(e) => { e.target.style.display = 'none'; }}
+                                          />
+                                        ) : (
+                                          <div className="w-9 h-9 rounded-full bg-sky-100 text-sky-700 font-bold flex items-center justify-center text-xs flex-shrink-0">
+                                            {(emp.name || 'S').charAt(0).toUpperCase()}
+                                          </div>
+                                        )}
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <p className="text-sm font-semibold text-gray-900">{emp.name || 'Unknown'}</p>
+                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-gray-100 text-gray-700">
+                                              {emp.employeeId ? `ID: ${emp.employeeId}` : ''}
+                                            </span>
+                                          </div>
+                                          <p className="text-xs text-gray-500 mt-0.5">
+                                            {emp.designation || 'Staff'} {emp.department ? `• ${emp.department}` : ''} {emp.phone ? `• ${emp.phone}` : ''}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <span className="text-xs font-semibold text-sky-600 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100 flex-shrink-0">
+                                        Select
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* When Student is selected, show SDMS record mapping */}
+                      {formData.type === 'student' && (
+                        <div className="md:col-span-2 lg:col-span-3 rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/80 via-blue-50/40 to-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-sm font-bold text-indigo-900 flex items-center gap-2">
+                              <AcademicCapIcon className="w-5 h-5 text-indigo-600" />
+                              Map Student Record with SDMS *
+                            </label>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                              Central SDMS Database
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 mb-3">
+                            Enter the student's PIN, Roll Number, or Admission Number to automatically map and populate their details from SDMS.
+                          </p>
+
+                          <div className="max-w-2xl">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <div className="relative flex-1">
+                                <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input
+                                  type="text"
+                                  value={studentIdentifier}
+                                  onChange={event => setStudentIdentifier(event.target.value)}
+                                  onKeyDown={event => {
+                                    if (event.key === 'Enter') {
+                                      event.preventDefault();
+                                      fetchStudentFromSdms();
+                                    }
+                                  }}
+                                  placeholder="Enter Student PIN or Admission No. (e.g. 21A91A0501)"
+                                  className="w-full pl-9 pr-3 py-2 border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm bg-white"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={fetchStudentFromSdms}
+                                disabled={studentLookupLoading || !studentIdentifier.trim()}
+                                className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm transition-all"
+                              >
+                                {studentLookupLoading ? (
+                                  <>
+                                    <LoadingSpinner size="sm" />
+                                    <span>Mapping...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <AcademicCapIcon className="w-4 h-4" />
+                                    <span>Map with SDMS</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            {studentLookupError && (
+                              <p className="mt-2 text-xs font-medium text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                                {studentLookupError}
+                              </p>
+                            )}
+                            {studentDataFetched && (
+                              <div className="mt-2 text-xs font-medium text-emerald-800 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                  <CheckCircleIcon className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                                  Mapped SDMS record: <strong>{formData.name}</strong> ({formData.rollNumber}) • {formData.courseName} {formData.branchName}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setStudentDataFetched(false);
+                                    setStudentIdentifier('');
+                                  }}
+                                  className="text-xs text-indigo-700 hover:text-indigo-900 underline font-semibold ml-2"
+                                >
+                                  Change
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Name *
@@ -2221,73 +3180,6 @@ const StaffGuestsManagement = () => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Type *
-                        </label>
-                        <select
-                          name="type"
-                          value={formData.type}
-                          onChange={handleInputChange}
-                          required
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="staff">Staff</option>
-                          <option value="guest">Guest</option>
-                          <option value="student">Student</option>
-                          <option value="warden">Warden</option>
-                        </select>
-                      </div>
-
-                      {formData.type === 'student' && (
-                        <div className="md:col-span-2 lg:col-span-3 rounded-lg border border-blue-100 bg-blue-50/60 p-4">
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            College Source *
-                          </label>
-                          <select
-                            name="collegeSource"
-                            value={formData.collegeSource}
-                            onChange={handleCollegeSourceChange}
-                            className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          >
-                            <option value="other-college">Other College</option>
-                            <option value="our-college">Our College (SDMS)</option>
-                          </select>
-                          {formData.collegeSource === 'our-college' && (
-                            <div className="mt-3 max-w-xl">
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                PIN / Admission Number
-                              </label>
-                              <div className="flex flex-col sm:flex-row gap-2">
-                                <input
-                                  type="text"
-                                  value={studentIdentifier}
-                                  onChange={event => setStudentIdentifier(event.target.value)}
-                                  onKeyDown={event => {
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault();
-                                      fetchStudentFromSdms();
-                                    }
-                                  }}
-                                  placeholder="Enter SDMS PIN or admission number"
-                                  className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={fetchStudentFromSdms}
-                                  disabled={studentLookupLoading || !studentIdentifier.trim()}
-                                  className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {studentLookupLoading ? 'Fetching…' : 'Fetch from SDMS'}
-                                </button>
-                              </div>
-                              {studentLookupError && <p className="mt-2 text-sm text-red-600">{studentLookupError}</p>}
-                              {studentDataFetched && <p className="mt-2 text-sm text-green-700">Student details loaded from SDMS.</p>}
-                            </div>
-                          )}
-                        </div>
-                      )}
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2684,243 +3576,246 @@ const StaffGuestsManagement = () => {
                         </>
                       )}
 
-                      {/* Charge Type and Charges Display - For Staff and Students */}
-                      {['staff', 'student'].includes(formData.type) && (
-                        <div className="md:col-span-2 lg:col-span-3">
-                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
-                            <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
-                              <CurrencyDollarIcon className="w-4 h-4 mr-2 text-blue-600" />
-                              Charges Information
+                      {/* Charges Information Section */}
+                      <div className="md:col-span-2 lg:col-span-3">
+                        {formData.entryPricing === 'free' ? (
+                          <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-green-50 rounded-xl p-5 border border-emerald-200 shadow-sm">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-bold text-emerald-900 flex items-center">
+                                <CheckCircleIcon className="w-5 h-5 mr-2 text-emerald-600" />
+                                Charges Information (Free Entry)
+                              </h4>
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                No Charges (₹0)
+                              </span>
+                            </div>
+                            <div className="bg-white rounded-lg p-4 border border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-0.5">Total Payable Charges</div>
+                                <div className="text-2xl font-black text-emerald-600">₹0</div>
+                              </div>
+                              <p className="text-xs text-gray-600 max-w-md sm:text-right">
+                                Free entry selected. The {formData.type} will be checked in without any charges. No room or stay fee will be levied.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-200 shadow-sm">
+                            <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center">
+                              <CurrencyDollarIcon className="w-5 h-5 mr-2 text-blue-600" />
+                              Charges Information (Charged Entry)
                             </h4>
 
-                            {/* Charge Type Selection - For Staff and Student */}
-                            {['staff', 'student'].includes(formData.type) && (
-                              <div className="mb-4 bg-white rounded-lg p-4 border border-blue-100">
-                                <label className="block text-sm font-medium text-gray-700 mb-3">
-                                  Charge Type *
+                            {/* Charge Type Selection: Per Day vs Fixed Charge */}
+                            <div className="mb-4 bg-white rounded-lg p-4 border border-blue-100">
+                              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Select Charge Option *
+                              </label>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label className={`flex items-start p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                                  formData.chargeType === 'per_day'
+                                    ? 'border-blue-600 bg-blue-50/70 font-semibold text-blue-900 ring-1 ring-blue-300'
+                                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                                }`}>
+                                  <input
+                                    type="radio"
+                                    name="chargeType"
+                                    value="per_day"
+                                    checked={formData.chargeType === 'per_day'}
+                                    onChange={handleInputChange}
+                                    className="mr-3 mt-1 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="text-sm font-bold">Per Day Rate</div>
+                                    <div className="text-xs text-gray-500 font-normal">Calculated based on daily rate × duration of stay</div>
+                                  </div>
                                 </label>
-                                <div className="flex gap-4">
-                                  <label className="flex items-center cursor-pointer">
-                                    <input
-                                      type="radio"
-                                      name="chargeType"
-                                      value="per_day"
-                                      checked={formData.chargeType === 'per_day'}
-                                      onChange={handleInputChange}
-                                      className="mr-2"
-                                    />
-                                    <span className="text-sm font-medium text-gray-700">Per Day Rate</span>
-                                  </label>
-                                  <label className="flex items-center cursor-pointer">
-                                    <input
-                                      type="radio"
-                                      name="chargeType"
-                                      value="monthly_fixed"
-                                      checked={['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)}
-                                      onChange={handleInputChange}
-                                      className="mr-2"
-                                    />
-                                    <span className="text-sm font-medium text-gray-700">Fixed Rate (For Period / Month)</span>
-                                  </label>
-                                </div>
-                              </div>
-                            )}
 
-                            <div className={`grid grid-cols-1 gap-4 ${['staff', 'student'].includes(formData.type) && ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) ? 'lg:grid-cols-2' : 'lg:grid-cols-3'}`}>
-                              {/* Per Day Rate or Monthly Fixed Amount Input */}
+                                <label className={`flex items-start p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                                  ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)
+                                    ? 'border-blue-600 bg-blue-50/70 font-semibold text-blue-900 ring-1 ring-blue-300'
+                                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                                }`}>
+                                  <input
+                                    type="radio"
+                                    name="chargeType"
+                                    value="monthly_fixed"
+                                    checked={['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)}
+                                    onChange={handleInputChange}
+                                    className="mr-3 mt-1 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="text-sm font-bold">Fixed Charge</div>
+                                    <div className="text-xs text-gray-500 font-normal">Lump sum fixed fee for the stay period or month</div>
+                                  </div>
+                                </label>
+                              </div>
+                            </div>
+
+                            {/* Rate Input & Calculation Summary */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Rate Input */}
                               <div className="bg-white rounded-lg p-4 border border-blue-100">
-                                <div className="text-sm font-medium text-gray-600 mb-3">
-                                  {['staff', 'student'].includes(formData.type) && ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)
-                                    ? 'Fixed Rate / Amount (₹)'
-                                    : 'Individual Daily Rate (₹)'}
-                                </div>
-                                <div className="space-y-2">
-                                  {['staff', 'student'].includes(formData.type) && ['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) ? (
-                                    <>
-                                      <div className="relative">
-                                        <CurrencyDollarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input
-                                          type="number"
-                                          name="monthlyFixedAmount"
-                                          value={formData.monthlyFixedAmount}
-                                          onChange={handleInputChange}
-                                          placeholder={formData.stayType === 'monthly' ? (dailyRateSettings.monthlyFixedAmount || 3000) : "Enter fixed rate amount"}
-                                          className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                          min="0"
-                                          step="0.01"
-                                        />
-                                      </div>
-                                      <div className="text-xs text-gray-500">
-                                        {formData.stayType === 'monthly' 
-                                          ? `Leave empty to use default: ₹${dailyRateSettings.monthlyFixedAmount || 3000}`
-                                          : `Fixed rate charge for this stay period`}
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <div className="relative">
-                                        <CurrencyDollarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input
-                                          type="number"
-                                          name="dailyRate"
-                                          value={formData.dailyRate}
-                                          onChange={handleInputChange}
-                                          placeholder={dailyRateSettings.staffDailyRate || 100}
-                                          className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                          min="0"
-                                          step="0.01"
-                                        />
-                                      </div>
-                                      <div className="text-xs text-gray-500">
-                                        Leave empty to use default: ₹{dailyRateSettings.staffDailyRate || 100}
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  {['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)
+                                    ? 'Fixed Charge Amount (₹) *'
+                                    : 'Daily Rate (₹/day) *'}
+                                </label>
+                                {['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) ? (
+                                  <div>
+                                    <div className="relative">
+                                      <CurrencyDollarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                      <input
+                                        type="number"
+                                        name="monthlyFixedAmount"
+                                        value={formData.monthlyFixedAmount}
+                                        onChange={handleInputChange}
+                                        placeholder={formData.type === 'staff' && formData.stayType === 'monthly' ? String(dailyRateSettings.monthlyFixedAmount || 3000) : "Enter fixed charge amount"}
+                                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                        min="0"
+                                        step="0.01"
+                                      />
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {formData.type === 'staff' && formData.stayType === 'monthly'
+                                        ? `Default: ₹${dailyRateSettings.monthlyFixedAmount || 3000}/month (leave empty to use default)`
+                                        : 'Enter total fixed charge for this stay'}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="relative">
+                                      <CurrencyDollarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                      <input
+                                        type="number"
+                                        name="dailyRate"
+                                        value={formData.dailyRate}
+                                        onChange={handleInputChange}
+                                        placeholder={String(dailyRateSettings.staffDailyRate || 100)}
+                                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                        min="0"
+                                        step="0.01"
+                                      />
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Default: ₹{dailyRateSettings.staffDailyRate || 100}/day (leave empty to use default)
+                                    </p>
+                                  </div>
+                                )}
                               </div>
 
-                              {/* Calculated Charges */}
-                              <div className="bg-white rounded-lg p-4 border border-green-100">
-                                <div className="text-sm font-medium text-gray-600 mb-3">Calculated Charges</div>
-                                <div className="space-y-2">
-                                  <div className="text-lg font-bold text-green-700">
-                                    ₹{(() => {
-                                      if (['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)) {
-                                        const amount = formData.monthlyFixedAmount
-                                          ? parseFloat(formData.monthlyFixedAmount)
-                                          : (formData.stayType === 'monthly' ? (dailyRateSettings.monthlyFixedAmount || 3000) : 0);
-                                        return amount.toLocaleString();
-                                      }
-                                      if (formData.type === 'staff' && formData.stayType === 'monthly' && formData.selectedMonth) {
-                                        const [year, month] = formData.selectedMonth.split('-').map(Number);
-                                        const daysInMonth = new Date(year, month, 0).getDate();
-                                        const rateToUse = formData.dailyRate ? parseFloat(formData.dailyRate) : (dailyRateSettings.staffDailyRate || 100);
-                                        return (daysInMonth * rateToUse).toLocaleString();
-                                      } else if (formData.checkinDate) {
-                                        const dayCount = calculateStayDays(formData.checkinDate, formData.checkoutDate);
-                                        const rateToUse = formData.dailyRate ? parseFloat(formData.dailyRate) : (dailyRateSettings.staffDailyRate || 100);
-                                        return (dayCount * rateToUse).toLocaleString();
-                                      }
-                                      return '0';
-                                    })()}
+                              {/* Calculated Summary */}
+                              <div className="bg-white rounded-lg p-4 border border-emerald-100 flex flex-col justify-between">
+                                <div>
+                                  <div className="text-xs uppercase tracking-wider font-semibold text-gray-500 mb-1">
+                                    Calculated Total Charge
                                   </div>
-                                  <div className="text-xs text-gray-500">
-                                    {(() => {
-                                      if (['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)) {
-                                        const amount = formData.monthlyFixedAmount
-                                          ? parseFloat(formData.monthlyFixedAmount)
-                                          : (formData.stayType === 'monthly' ? (dailyRateSettings.monthlyFixedAmount || 3000) : 0);
-                                        return `Fixed rate: ₹${amount.toLocaleString()}`;
-                                      }
-                                      if (formData.type === 'staff' && formData.stayType === 'monthly' && formData.selectedMonth) {
-                                        const [year, month] = formData.selectedMonth.split('-').map(Number);
-                                        const daysInMonth = new Date(year, month, 0).getDate();
-                                        const rateToUse = formData.dailyRate ? parseFloat(formData.dailyRate) : (dailyRateSettings.staffDailyRate || 100);
-                                        return `${daysInMonth} days × ₹${rateToUse}`;
-                                      } else if (formData.checkinDate) {
-                                        const dayCount = calculateStayDays(formData.checkinDate, formData.checkoutDate);
-                                        const rateToUse = formData.dailyRate ? parseFloat(formData.dailyRate) : (dailyRateSettings.staffDailyRate || 100);
-                                        return `${dayCount} days × ₹${rateToUse}`;
-                                      }
-                                      return formData.type === 'staff' && formData.stayType === 'monthly'
-                                        ? 'Select month to calculate'
-                                        : 'Enter check-in date to calculate';
-                                    })()}
+                                  <div className="text-2xl font-black text-emerald-600 mb-1">
+                                    ₹{calculatePreviewCharges().toLocaleString('en-IN')}
                                   </div>
+                                </div>
+                                <div className="text-xs text-gray-500 font-medium bg-gray-50 p-2 rounded border border-gray-100">
+                                  {getCalculationBreakdownText()}
                                 </div>
                               </div>
-
-                              {/* Default Rate - Only show for per_day charge type */}
-                              {!['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) && (
-                                <div className="bg-white rounded-lg p-4 border border-purple-100">
-                                  <div className="text-sm font-medium text-gray-600 mb-3">Default Rate</div>
-                                  <div className="space-y-2">
-                                    <div className="text-lg font-bold text-purple-700">₹{dailyRateSettings.staffDailyRate || 100}</div>
-                                    <div className="text-xs text-gray-500">From settings</div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <div className="mt-3 text-xs text-gray-600">
-                              {['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) ? (
-                                <p>• Fixed rate amount will be charged as lump sum for the stay period/month</p>
-                              ) : formData.type === 'staff' && formData.stayType === 'monthly' ? (
-                                <>
-                                  <p>• Set individual daily rate or leave empty to use default from settings</p>
-                                  <p>• Charges are calculated for the entire selected month (days × rate)</p>
-                                </>
-                              ) : (
-                                <>
-                                  <p>• Set individual daily rate or leave empty to use default from settings</p>
-                                  <p>• Charges are calculated based on the number of days between check-in and check-out dates</p>
-                                  <p>• If no check-out date is provided, charges are calculated until today</p>
-                                </>
-                              )}
                             </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
 
-                      {/* Guest Information - No Charges */}
-                      {formData.type === 'guest' && (
-                        <div className="md:col-span-2 lg:col-span-3">
-                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
-                            <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
-                              <UserIcon className="w-4 h-4 mr-2 text-green-600" />
-                              Guest Information
-                            </h4>
-                            <div className="bg-white rounded-lg p-3 border border-green-100">
-                              <div className="text-sm font-medium text-gray-600 mb-1">Charges</div>
-                              <div className="text-lg font-bold text-green-700">₹0</div>
-                              <div className="text-xs text-gray-500">No charges for guests</div>
-                            </div>
-                            <div className="mt-3 text-xs text-gray-600">
-                              <p>• Guests are not charged for their stay</p>
-                              <p>• Only staff members are subject to daily charges</p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
+                      {/* Photo Section: Only guests have manual file upload, student & staff photos are fetched from SDMS/HRMS */}
                       <div className="md:col-span-2 lg:col-span-3">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Photo
                         </label>
 
-                        {/* Current Photo Preview */}
-                        {formData.existingPhoto && (
-                          <div className="mb-3">
-                            <p className="text-sm text-gray-600 mb-2">Current Photo:</p>
-                            <img
-                              src={formData.existingPhoto}
-                              alt="Current photo"
-                              className="w-20 h-24 object-cover rounded border border-gray-300"
+                        {/* Guest Type: Allow File Upload */}
+                        {formData.type === 'guest' ? (
+                          <>
+                            {/* Current Photo Preview for Guest */}
+                            {formData.existingPhoto && (
+                              <div className="mb-3">
+                                <p className="text-sm text-gray-600 mb-2">Current Photo:</p>
+                                <img
+                                  src={formData.existingPhoto}
+                                  alt="Current photo"
+                                  className="w-20 h-24 object-cover rounded border border-gray-300"
+                                />
+                              </div>
+                            )}
+
+                            {/* New Photo Preview for Guest */}
+                            {formData.photo && (
+                              <div className="mb-3">
+                                <p className="text-sm text-gray-600 mb-2">New Photo Preview:</p>
+                                <img
+                                  src={URL.createObjectURL(formData.photo)}
+                                  alt="New photo preview"
+                                  className="w-20 h-24 object-cover rounded border border-gray-300"
+                                />
+                              </div>
+                            )}
+
+                            <input
+                              type="file"
+                              name="photo"
+                              accept="image/*"
+                              onChange={handleInputChange}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             />
+                            <p className="text-xs text-gray-500 mt-1">
+                              {editingStaffGuest ? 'Select a new photo to replace the current one' : 'Select a photo for this guest'}
+                            </p>
+                          </>
+                        ) : (
+                          /* Student / Staff / Warden: Photo fetched from SDMS / HRMS. Upload photo option is removed as requested! */
+                          <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                            {formData.sdmsPhotoUrl || formData.existingPhoto ? (
+                              <div className="flex items-center gap-4">
+                                <img
+                                  src={formData.sdmsPhotoUrl || formData.existingPhoto}
+                                  alt={`${formData.type} photo`}
+                                  className="w-20 h-24 object-cover rounded-lg border-2 border-indigo-200 shadow-sm"
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                  }}
+                                />
+                                <div>
+                                  <p className="text-sm font-bold text-gray-900">
+                                    {formData.type === 'student' ? 'SDMS Profile Photo' : 'HRMS Profile Photo'}
+                                  </p>
+                                  <p className="text-xs text-gray-600 mt-1">
+                                    {formData.type === 'student'
+                                      ? 'Photo is automatically fetched from central SDMS records.'
+                                      : 'Photo is automatically fetched from HRMS employee records.'}
+                                  </p>
+                                  <span className="inline-flex items-center mt-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <CheckCircleIcon className="w-4 h-4 mr-1 text-emerald-600" />
+                                    Synced from {formData.type === 'student' ? 'SDMS' : 'HRMS'}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-3 text-gray-500 py-1">
+                                <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                  <UserIcon className="w-6 h-6 text-gray-400" />
+                                </div>
+                                <div className="text-xs">
+                                  <p className="font-semibold text-gray-800">
+                                    {formData.type === 'student'
+                                      ? 'No SDMS Photo Mapped Yet'
+                                      : 'No HRMS Photo Mapped Yet'}
+                                  </p>
+                                  <p className="text-gray-500 mt-0.5">
+                                    {formData.type === 'student'
+                                      ? 'Map the student PIN or Roll Number above to fetch their profile photo from SDMS.'
+                                      : 'Search and map the employee above to fetch their profile photo from HRMS.'}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
-
-                        {/* New Photo Preview */}
-                        {formData.photo && (
-                          <div className="mb-3">
-                            <p className="text-sm text-gray-600 mb-2">New Photo Preview:</p>
-                            <img
-                              src={URL.createObjectURL(formData.photo)}
-                              alt="New photo preview"
-                              className="w-20 h-24 object-cover rounded border border-gray-300"
-                            />
-                          </div>
-                        )}
-
-                        <input
-                          type="file"
-                          name="photo"
-                          accept="image/*"
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          {editingStaffGuest ? 'Select a new photo to replace the current one' : 'Select a photo for this staff/guest'}
-                        </p>
                       </div>
                     </div>
 
@@ -3153,45 +4048,65 @@ const StaffGuestsManagement = () => {
                     </div>
 
                     {/* Charges Information */}
-                    {selectedStaffGuest.type !== 'guest' && (
-                      <div className="bg-gray-50 rounded-lg p-4">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                          <CurrencyDollarIcon className="w-5 h-5 mr-2 text-yellow-600" />
-                          Charges Information
-                        </h3>
-                        <div className="space-y-3">
-                          <div>
-                            <span className="text-sm font-medium text-gray-600">Charge Type:</span>
-                            <p className="text-sm text-gray-900 font-medium">
-                              {['monthly_fixed', 'fixed_rate', 'fixed'].includes(selectedStaffGuest.chargeType) ? 'Fixed Rate' : 'Per Day Rate'}
-                            </p>
-                          </div>
-                          {['monthly_fixed', 'fixed_rate', 'fixed'].includes(selectedStaffGuest.chargeType) ? (
-                            <div>
-                              <span className="text-sm font-medium text-gray-600">Fixed Rate:</span>
-                              <p className="text-sm text-gray-900">
-                                ₹{(selectedStaffGuest.monthlyFixedAmount || selectedStaffGuest.calculatedCharges || 0).toLocaleString('en-IN')}
-                              </p>
-                            </div>
-                          ) : (
-                            <div>
-                              <span className="text-sm font-medium text-gray-600">Daily Rate:</span>
-                              <p className="text-sm text-gray-900">
-                                ₹{selectedStaffGuest.dailyRate || dailyRateSettings.staffDailyRate || 100} per day
-                              </p>
-                            </div>
-                          )}
-                          <div>
-                            <span className="text-sm font-medium text-gray-600">Total Charges:</span>
-                            <p className="text-lg font-bold text-green-600">
-                              ₹{typeof selectedStaffGuest.calculatedCharges === 'number'
-                                ? selectedStaffGuest.calculatedCharges.toLocaleString('en-IN')
-                                : (selectedStaffGuest.calculatedCharges || 0)}
-                            </p>
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                        <CurrencyDollarIcon className="w-5 h-5 mr-2 text-yellow-600" />
+                        Charges Information
+                      </h3>
+                      <div className="space-y-3">
+                        <div>
+                          <span className="text-sm font-medium text-gray-600">Billing Mode:</span>
+                          <div className="mt-1">
+                            {isStaffGuestFree(selectedStaffGuest) ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Free Entry
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                                Charged Entry
+                              </span>
+                            )}
                           </div>
                         </div>
+
+                        {isStaffGuestFree(selectedStaffGuest) ? (
+                          <div>
+                            <span className="text-sm font-medium text-gray-600">Total Charges:</span>
+                            <p className="text-lg font-bold text-emerald-600">₹0 (Checked in without charges)</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div>
+                              <span className="text-sm font-medium text-gray-600">Charge Type:</span>
+                              <p className="text-sm text-gray-900 font-medium">
+                                {['monthly_fixed', 'fixed_rate', 'fixed'].includes(selectedStaffGuest.chargeType) ? 'Fixed Rate' : 'Per Day Rate'}
+                              </p>
+                            </div>
+                            {['monthly_fixed', 'fixed_rate', 'fixed'].includes(selectedStaffGuest.chargeType) ? (
+                              <div>
+                                <span className="text-sm font-medium text-gray-600">Fixed Rate:</span>
+                                <p className="text-sm text-gray-900">
+                                  ₹{(selectedStaffGuest.monthlyFixedAmount || getDisplayCharge(selectedStaffGuest) || 0).toLocaleString('en-IN')}
+                                </p>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="text-sm font-medium text-gray-600">Daily Rate:</span>
+                                <p className="text-sm text-gray-900">
+                                  ₹{selectedStaffGuest.dailyRate || dailyRateSettings.staffDailyRate || 100} per day
+                                </p>
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-sm font-medium text-gray-600">Total Charges:</span>
+                              <p className="text-lg font-bold text-green-600">
+                                ₹{getDisplayCharge(selectedStaffGuest).toLocaleString('en-IN')}
+                              </p>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
 
                   {/* Action Buttons */}
@@ -3386,6 +4301,238 @@ const StaffGuestsManagement = () => {
                       Renew & Generate Admit Card
                     </button>
                   </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+
+          {/* Recheck Student Details & Fee Confirmation Modal */}
+          {showStudentFeeConfirmModal && formData.type === 'student' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+              onClick={() => !isSubmitting && setShowStudentFeeConfirmModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 10 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden border border-gray-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 text-white p-5 sm:p-6 flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-white/10 rounded-xl backdrop-blur-md">
+                      <AcademicCapIcon className="w-6 h-6 text-indigo-100" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg sm:text-xl font-bold tracking-tight">
+                        Confirm Student Details & Fee
+                      </h3>
+                      <p className="text-xs sm:text-sm text-indigo-100/90 mt-0.5">
+                        Please recheck the student details and confirmed fee amount before updating
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setShowStudentFeeConfirmModal(false)}
+                    className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+                  >
+                    <XMarkIcon className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-5 sm:p-6 space-y-4 overflow-y-auto">
+                  {/* Student Identity Card */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                    {formData.sdmsPhotoUrl || formData.existingPhoto || (formData.photo && typeof formData.photo === 'string') ? (
+                      <img
+                        src={formData.sdmsPhotoUrl || formData.existingPhoto || formData.photo}
+                        alt={formData.name || 'Student'}
+                        className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-2 border-indigo-300 shadow-sm flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-indigo-200 text-indigo-600 flex-shrink-0">
+                        <UserIcon className="w-8 h-8 sm:w-10 sm:h-10" />
+                      </div>
+                    )}
+                    <div className="flex-1 text-center sm:text-left space-y-1">
+                      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        <h4 className="text-base sm:text-lg font-bold text-gray-900">{formData.name || 'Unnamed Student'}</h4>
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          SDMS Student
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600 pt-1">
+                        <div>
+                          <span className="font-semibold text-gray-700">Roll/PIN No: </span>
+                          <span className="font-mono font-bold text-indigo-950">{formData.rollNumber || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-gray-700">Admission No: </span>
+                          <span className="font-mono text-gray-800">{formData.admissionNumber || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-gray-700">Course & Branch: </span>
+                          <span>{formData.courseName || ''} {formData.branchName ? `(${formData.branchName})` : ''}</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-gray-700">Phone: </span>
+                          <span>{formData.phoneNumber || 'N/A'}</span>
+                        </div>
+                        {formData.collegeName && (
+                          <div className="sm:col-span-2">
+                            <span className="font-semibold text-gray-700">College: </span>
+                            <span>{formData.collegeName}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stay & Purpose Info */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-2">
+                    <div className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                      <ClockIcon className="w-4 h-4 text-blue-600" />
+                      Stay & Purpose Details
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                      <div>
+                        <span className="text-gray-500 block">Check-in Date</span>
+                        <span className="font-semibold text-gray-800">{formatDateDDMMYYYY(formData.checkinDate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block">Check-out Date</span>
+                        <span className="font-semibold text-gray-800">{formatDateDDMMYYYY(formData.checkoutDate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block">Stay Duration</span>
+                        <span className="font-semibold text-blue-700">
+                          {formData.checkinDate ? `${calculateStayDays(formData.checkinDate, formData.checkoutDate)} Days` : 'N/A'}
+                        </span>
+                      </div>
+                      {formData.purpose && (
+                        <div className="col-span-2 sm:col-span-3">
+                          <span className="text-gray-500 block">Purpose</span>
+                          <span className="font-medium text-gray-800">{formData.purpose}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Prominent Fee & Charges Verification Card */}
+                  <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 border-2 border-emerald-300 rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <CurrencyDollarIcon className="w-5 h-5 text-emerald-700" />
+                        <h4 className="text-sm font-bold text-emerald-950 uppercase tracking-wider">
+                          Fee & Charges Verification
+                        </h4>
+                      </div>
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
+                        formData.entryPricing === 'free'
+                          ? 'bg-emerald-200 text-emerald-900 border border-emerald-400'
+                          : 'bg-blue-100 text-blue-900 border border-blue-300'
+                      }`}>
+                        {formData.entryPricing === 'free' ? 'Free Entry (₹0)' : 'Charged Entry'}
+                      </span>
+                    </div>
+
+                    <div className="bg-white rounded-lg p-3.5 border border-emerald-200 space-y-3">
+                      {formData.entryPricing === 'free' ? (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs uppercase font-semibold text-gray-500">Total Payable Charges</span>
+                            <div className="text-2xl font-black text-emerald-600">₹0</div>
+                          </div>
+                          <span className="text-xs text-gray-600 text-right">
+                            Checked in without any charges. No stay fee levied.
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-2 gap-3 text-xs border-b border-gray-100 pb-2.5">
+                            <div>
+                              <span className="text-gray-500 block">Charge Option:</span>
+                              <span className="font-bold text-gray-800">
+                                {['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType) ? 'Fixed Charge' : 'Per Day Rate'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 block">Rate / Fixed Amount:</span>
+                              <span className="font-bold text-indigo-700">
+                                {['monthly_fixed', 'fixed_rate', 'fixed'].includes(formData.chargeType)
+                                  ? `₹${Number(formData.monthlyFixedAmount || 0).toLocaleString('en-IN')}`
+                                  : `₹${Number(formData.dailyRate || dailyRateSettings.staffDailyRate || 100).toLocaleString('en-IN')}/day`}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1">
+                            <div>
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                                Confirmed Total Charge
+                              </span>
+                              <div className="text-3xl font-black text-emerald-600">
+                                ₹{calculatePreviewCharges().toLocaleString('en-IN')}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-xs text-gray-600 bg-gray-50 px-2.5 py-1.5 rounded-lg border border-gray-200 font-medium inline-block">
+                                {getCalculationBreakdownText()}
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex items-start gap-2 text-xs text-emerald-900 bg-emerald-100/60 p-2.5 rounded-lg border border-emerald-200 font-medium">
+                      <CheckCircleIcon className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
+                      <span>
+                        Please recheck the details above. Clicking <strong>"{editingStaffGuest ? 'Update Student' : 'Add Student'}"</strong> below will save this fee and record for this student.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer Actions */}
+                <div className="bg-gray-50 px-5 sm:px-6 py-4 border-t border-gray-200 flex flex-wrap items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setShowStudentFeeConfirmModal(false)}
+                    className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                  >
+                    Cancel / Back to Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={async () => {
+                      setShowStudentFeeConfirmModal(false);
+                      await executeSubmit();
+                    }}
+                    className="px-5 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <LoadingSpinner size="sm" />
+                        <span>Updating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckIcon className="w-4 h-4" />
+                        <span>{editingStaffGuest ? 'Update Student' : 'Confirm & Add Student'}</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </motion.div>
             </motion.div>

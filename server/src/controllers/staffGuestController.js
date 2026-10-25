@@ -207,6 +207,10 @@ export const addStaffGuest = async (req, res, next) => {
     let photoUrl = null;
     if (req.file) {
       photoUrl = await uploadToS3(req.file, 'staff-guest-photos');
+    } else if (req.body.photo && typeof req.body.photo === 'string' && /^https?:\/\//i.test(req.body.photo)) {
+      photoUrl = req.body.photo;
+    } else if (req.body.sdmsPhotoUrl && typeof req.body.sdmsPhotoUrl === 'string' && /^https?:\/\//i.test(req.body.sdmsPhotoUrl)) {
+      photoUrl = req.body.sdmsPhotoUrl;
     }
 
     // Calculate charges for staff and students only
@@ -274,6 +278,15 @@ export const addStaffGuest = async (req, res, next) => {
 
     const savedStaffGuest = await staffGuest.save();
 
+    if (savedStaffGuest.type === 'student') {
+      try {
+        const { syncStudentGuestStayFeeSafely } = await import('../services/feesSyncService.js');
+        await syncStudentGuestStayFeeSafely(savedStaffGuest);
+      } catch (syncErr) {
+        console.error('❌ Failed to sync student stay fee to Fees DB on creation:', syncErr.message);
+      }
+    }
+
     res.status(201).json({
       success: true,
       data: savedStaffGuest,
@@ -338,30 +351,137 @@ export const getStaffGuests = async (req, res, next) => {
       gender, 
       department, 
       search, 
-      isActive 
+      isActive,
+      checkInStatus,
+      chargeType,
+      chargingBasis,
+      dateRange,
+      startDate,
+      endDate
     } = req.query;
 
     // Handle isActive filter - default to true if not specified
-    // Query params come as strings, so we need to check both 'true' string and true boolean
     const isActiveFilter = isActive === undefined || isActive === 'true' || isActive === true;
     const query = { isActive: isActiveFilter };
-    
-    console.log('Query filter - isActive param:', isActive, '→ isActiveFilter:', isActiveFilter);
 
-    // Add filters if provided (skip empty strings)
-    if (type && type.trim() !== '') query.type = type;
-    if (gender && gender.trim() !== '') query.gender = gender;
-    if (department && department.trim() !== '') query.department = department;
+    // Filter by type (all, student, staff, guest, warden)
+    if (type && type.trim() !== '' && type !== 'all') {
+      query.type = type.trim();
+    }
+    if (gender && gender.trim() !== '' && gender !== 'all') {
+      query.gender = gender.trim();
+    }
+    if (department && department.trim() !== '' && department !== 'all') {
+      query.department = department.trim();
+    }
 
-    // Add search functionality
-    if (search) {
-      const searchRegex = new RegExp(search, 'i');
-      query.$or = [
-        { name: searchRegex },
-        { profession: searchRegex },
-        { phoneNumber: searchRegex },
-        { email: searchRegex }
-      ];
+    // Filter by Check-In Status (all, checked_in, checked_out)
+    if (checkInStatus && checkInStatus !== 'all') {
+      if (checkInStatus === 'checked_in') {
+        query.checkInTime = { $exists: true, $ne: null };
+        query.checkOutTime = null;
+      } else if (checkInStatus === 'checked_out') {
+        query.checkOutTime = { $exists: true, $ne: null };
+      }
+    }
+
+    // Filter by Charge Type (all, free, charged)
+    if (chargeType && chargeType !== 'all') {
+      query.$and = query.$and || [];
+      if (chargeType === 'free') {
+        query.$and.push({
+          $or: [
+            { entryPricing: 'free' },
+            {
+              type: 'guest',
+              dailyRate: { $in: [null, 0] },
+              monthlyFixedAmount: { $in: [null, 0] },
+              calculatedCharges: { $in: [null, 0] }
+            },
+            {
+              dailyRate: 0,
+              monthlyFixedAmount: { $in: [null, 0] },
+              calculatedCharges: { $in: [null, 0] }
+            }
+          ]
+        });
+      } else if (chargeType === 'charged') {
+        query.$and.push({
+          entryPricing: { $ne: 'free' },
+          $or: [
+            { dailyRate: { $gt: 0 } },
+            { monthlyFixedAmount: { $gt: 0 } },
+            { calculatedCharges: { $gt: 0 } },
+            { chargeType: { $in: ['per_day', 'monthly_fixed', 'fixed', 'fixed_rate'] } }
+          ]
+        });
+      }
+    }
+
+    // Filter by Charging Basis (all, per_day, fixed, monthly)
+    if (chargingBasis && chargingBasis !== 'all') {
+      if (chargingBasis === 'per_day') {
+        query.chargeType = 'per_day';
+      } else if (chargingBasis === 'fixed') {
+        query.chargeType = { $in: ['fixed', 'fixed_rate', 'monthly_fixed'] };
+      } else if (chargingBasis === 'monthly') {
+        query.stayType = 'monthly';
+      }
+    }
+
+    // Filter by Date Range (all, today, this_week, this_month, custom)
+    if (dateRange && dateRange !== 'all') {
+      const now = new Date();
+      let start = null;
+      let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      if (dateRange === 'today') {
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      } else if (dateRange === 'this_week') {
+        start = new Date(now);
+        start.setDate(now.getDate() - now.getDay());
+        start.setHours(0, 0, 0, 0);
+      } else if (dateRange === 'this_month') {
+        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      } else if (dateRange === 'custom') {
+        if (req.query.startDate) {
+          start = new Date(req.query.startDate);
+          start.setHours(0, 0, 0, 0);
+        }
+        if (req.query.endDate) {
+          end = new Date(req.query.endDate);
+          end.setHours(23, 59, 59, 999);
+        }
+      }
+
+      if (start) {
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { checkInTime: { $gte: start, $lte: end } },
+            { createdAt: { $gte: start, $lte: end } },
+            { checkinDate: { $gte: start, $lte: end } }
+          ]
+        });
+      }
+    }
+
+    // Add search functionality (name, rollNumber, admissionNumber, profession, phoneNumber, email, department, collegeName)
+    if (search && search.trim() !== '') {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { name: searchRegex },
+          { rollNumber: searchRegex },
+          { admissionNumber: searchRegex },
+          { profession: searchRegex },
+          { phoneNumber: searchRegex },
+          { email: searchRegex },
+          { department: searchRegex },
+          { collegeName: searchRegex }
+        ]
+      });
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -666,6 +786,10 @@ export const updateStaffGuest = async (req, res, next) => {
       }
       // Upload new photo
       staffGuest.photo = await uploadToS3(req.file, 'staff-guest-photos');
+    } else if (req.body.photo && typeof req.body.photo === 'string' && /^https?:\/\//i.test(req.body.photo)) {
+      staffGuest.photo = req.body.photo;
+    } else if (req.body.sdmsPhotoUrl && typeof req.body.sdmsPhotoUrl === 'string' && /^https?:\/\//i.test(req.body.sdmsPhotoUrl)) {
+      staffGuest.photo = req.body.sdmsPhotoUrl;
     }
 
     // Update fields
@@ -729,6 +853,9 @@ export const updateStaffGuest = async (req, res, next) => {
     }
     
     if (dailyRate !== undefined) staffGuest.dailyRate = dailyRate ? parseFloat(dailyRate) : null;
+    if (req.body.entryPricing !== undefined) {
+      staffGuest.entryPricing = req.body.entryPricing;
+    }
     
     // Update charge type and fixed amount for staff and students
     if (['staff', 'student'].includes(currentType)) {
@@ -749,7 +876,13 @@ export const updateStaffGuest = async (req, res, next) => {
     
     // Recalculate charges for staff and students
     if (['staff', 'student'].includes(currentType)) {
-      staffGuest.calculatedCharges = staffGuest.calculateCharges(dailyRateSettings.staffDailyRate);
+      if (staffGuest.entryPricing === 'free') {
+        staffGuest.dailyRate = 0;
+        staffGuest.monthlyFixedAmount = 0;
+        staffGuest.calculatedCharges = 0;
+      } else {
+        staffGuest.calculatedCharges = staffGuest.calculateCharges(dailyRateSettings.staffDailyRate);
+      }
     } else if (currentType === 'guest') {
       staffGuest.calculatedCharges = 0;
     }
@@ -770,6 +903,15 @@ export const updateStaffGuest = async (req, res, next) => {
     staffGuest.lastModifiedBy = req.admin._id;
 
     const updatedStaffGuest = await staffGuest.save();
+
+    if (updatedStaffGuest.type === 'student') {
+      try {
+        const { syncStudentGuestStayFeeSafely } = await import('../services/feesSyncService.js');
+        await syncStudentGuestStayFeeSafely(updatedStaffGuest);
+      } catch (syncErr) {
+        console.error('❌ Failed to sync student stay fee to Fees DB on update:', syncErr.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -795,6 +937,15 @@ export const deleteStaffGuest = async (req, res, next) => {
     staffGuest.isActive = false;
     staffGuest.lastModifiedBy = req.admin._id;
     await staffGuest.save();
+
+    if (staffGuest.type === 'student') {
+      try {
+        const { syncStudentGuestStayFeeSafely } = await import('../services/feesSyncService.js');
+        await syncStudentGuestStayFeeSafely(staffGuest);
+      } catch (syncErr) {
+        console.error('❌ Failed to sync student stay fee to Fees DB on delete:', syncErr.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -981,9 +1132,48 @@ export const getStaffGuestStats = async (req, res, next) => {
     const checkedInStudents = await StaffGuest.countDocuments({ 
       type: 'student', 
       isActive: true,
-      checkInTime: { $exists: true },
+      checkInTime: { $exists: true, $ne: null },
       checkOutTime: null
     });
+
+    // 1. Total Checked In – Total number of people who have checked in
+    const totalCheckedIn = await StaffGuest.countDocuments({
+      checkInTime: { $exists: true, $ne: null }
+    });
+
+    // 2. Total Checked Out – Total number of people who have completed their check-out
+    const totalCheckedOut = await StaffGuest.countDocuments({
+      checkOutTime: { $exists: true, $ne: null }
+    });
+
+    // 3. Currently Inside – Total number of people who have checked in but have not yet checked out
+    const currentlyInside = await StaffGuest.countDocuments({
+      checkInTime: { $exists: true, $ne: null },
+      checkOutTime: null
+    });
+
+    // 4. Today's Check-Ins – Total number of new check-ins recorded today
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    const todayCheckIns = await StaffGuest.countDocuments({
+      checkInTime: { $gte: startOfToday, $lte: endOfToday }
+    });
+
+    // Free & Charged metrics
+    const allRecords = await StaffGuest.find({ isActive: true });
+    const isFreeRecord = (sg) => {
+      if (sg.entryPricing === 'free') return true;
+      if (sg.type === 'guest' && !sg.dailyRate && !sg.monthlyFixedAmount && (!sg.calculatedCharges || sg.calculatedCharges === 0)) return true;
+      if (sg.dailyRate === 0 && (!sg.monthlyFixedAmount || sg.monthlyFixedAmount === 0) && (!sg.calculatedCharges || sg.calculatedCharges === 0)) return true;
+      return false;
+    };
+    const freeEntries = allRecords.filter(isFreeRecord).length;
+    const chargedEntries = allRecords.filter(s => !isFreeRecord(s)).length;
+    const perDayCharges = allRecords.filter(s => !isFreeRecord(s) && (s.chargeType === 'per_day' || (!s.chargeType && s.dailyRate > 0))).length;
+    const fixedCharges = allRecords.filter(s => !isFreeRecord(s) && (['monthly_fixed', 'fixed_rate', 'fixed'].includes(s.chargeType) || s.monthlyFixedAmount > 0 || s.stayType === 'monthly')).length;
 
     res.json({
       success: true,
@@ -996,7 +1186,14 @@ export const getStaffGuestStats = async (req, res, next) => {
         checkedInStudents,
         totalRegistered: totalStaff + totalGuests + totalStudents, // All registered (active records)
         totalActive: checkedInStaff + checkedInGuests + checkedInStudents, // Currently checked in only
-        totalCheckedIn: checkedInStaff + checkedInGuests + checkedInStudents
+        totalCheckedIn,
+        totalCheckedOut,
+        currentlyInside,
+        todayCheckIns,
+        freeEntries,
+        chargedEntries,
+        perDayCharges,
+        fixedCharges
       }
     });
   } catch (error) {

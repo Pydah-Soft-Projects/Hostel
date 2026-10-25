@@ -31,6 +31,7 @@ const HostelFee = () => {
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [paymentHistory, setPaymentHistory] = useState([]);
+  const [guestStayFeeData, setGuestStayFeeData] = useState(null);
   
   // Courses state for resolving SQL IDs
   const [allCourses, setAllCourses] = useState([]);
@@ -135,6 +136,16 @@ const HostelFee = () => {
       // Set payment history
       if (paymentResponse.data.success) {
         setPaymentHistory(paymentResponse.data.data || []);
+      }
+
+      // Fetch stay fee if student has any records in Staff & Guests
+      try {
+        const stayFeeRes = await api.get('/api/students/guest-stay-fee');
+        if (stayFeeRes.data?.success) {
+          setGuestStayFeeData(stayFeeRes.data.data);
+        }
+      } catch (stayErr) {
+        console.error('Error fetching student guest stay fee:', stayErr);
       }
     } catch (err) {
       console.error('Error fetching fee data:', err);
@@ -611,6 +622,92 @@ const HostelFee = () => {
               <div className="text-xs font-medium text-gray-600 mb-1">Final Total Fee</div>
               <div className="text-sm sm:text-lg font-bold text-green-700">₹{totalCalculatedFee.toLocaleString()}</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Staff & Guest Stay Hostel Fee Section */}
+      {guestStayFeeData && guestStayFeeData.hasStayFee && (
+        <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 rounded-lg sm:rounded-xl shadow-sm border border-indigo-200 p-3 sm:p-6 mb-3 sm:mb-6">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <div className="flex items-center">
+              <CalendarIcon className="w-4 h-4 sm:w-6 sm:h-6 text-indigo-600 mr-2" />
+              <h2 className="text-sm sm:text-lg font-semibold text-gray-900">
+                Staff & Guest Management Stay Fee
+              </h2>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+              Special / Short-Term Stay
+            </span>
+          </div>
+
+          <p className="text-xs text-gray-600 mb-3">
+            Fee records assigned for hostel stay via Staff & Guest Management.
+          </p>
+
+          <div className="space-y-3">
+            {guestStayFeeData.stays.map((stay, idx) => {
+              const isFixed = ['monthly_fixed', 'fixed_rate', 'fixed'].includes(stay.chargeType);
+              const feeAmount = stay.calculatedCharges || (isFixed ? (stay.monthlyFixedAmount || 0) : 0);
+              const isFree = stay.entryPricing === 'free' || feeAmount === 0;
+
+              return (
+                <div key={stay._id || idx} className="bg-white rounded-lg p-3 sm:p-4 border border-indigo-100 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-gray-900">{stay.purpose || 'Hostel Stay'}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        isFree ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {isFree ? 'Free Stay' : (isFixed ? 'Fixed Charge' : 'Daily Rate')}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+                      {stay.checkinDate && (
+                        <span>
+                          <strong className="text-gray-700">Check-in:</strong> {new Date(stay.checkinDate).toLocaleDateString('en-IN')}
+                        </span>
+                      )}
+                      {stay.checkoutDate && (
+                        <span>
+                          <strong className="text-gray-700">Check-out:</strong> {new Date(stay.checkoutDate).toLocaleDateString('en-IN')}
+                        </span>
+                      )}
+                      {stay.roomNumber && (
+                        <span>
+                          <strong className="text-gray-700">Room:</strong> {stay.roomNumber} {stay.bedNumber ? `(Bed ${stay.bedNumber})` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between md:justify-end gap-4 border-t md:border-t-0 pt-2 md:pt-0">
+                    <div className="text-left md:text-right">
+                      <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 block">
+                        Assigned Stay Fee
+                      </span>
+                      <span className="text-lg sm:text-2xl font-black text-indigo-700">
+                        {isFree ? '₹0' : `₹${Number(feeAmount).toLocaleString('en-IN')}`}
+                      </span>
+                    </div>
+                    <div>
+                      {stay.checkInTime && !stay.checkOutTime ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                          <CheckCircleIcon className="w-3.5 h-3.5 mr-1" />
+                          Checked In
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                          <ClockIcon className="w-3.5 h-3.5 mr-1" />
+                          Checked Out
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -538,3 +538,139 @@ export const deleteAllStudentHostelFeesSafely = async (admissionNumber) => {
     return { ok: false, error: error.message };
   }
 };
+
+/**
+ * Syncs student stay fee from Staff & Guest Management to external Fees Database (StudentFee model)
+ */
+export const syncStudentGuestStayFee = async (staffGuestDoc) => {
+  if (!(await ensureFeesReady())) {
+    console.warn('⚠️ Fees database is not configured. Skipping stay fee sync.');
+    return { skipped: true, reason: 'fees_db_not_configured' };
+  }
+
+  const plain = staffGuestDoc?.toObject ? staffGuestDoc.toObject() : { ...staffGuestDoc };
+  if (plain.type !== 'student') {
+    return { skipped: true, reason: 'not_a_student' };
+  }
+
+  const studentId = String(plain.admissionNumber || plain.rollNumber || '').trim();
+  if (!studentId) {
+    console.warn('⚠️ Missing student admission/roll number. Skipping stay fee sync.');
+    return { skipped: true, reason: 'missing_student_id' };
+  }
+
+  // Find student in local User collection to get academicYear, course, etc. if available
+  let studentUser = null;
+  try {
+    const User = (await import('../models/User.js')).default;
+    studentUser = await User.findOne({
+      $or: [
+        { rollNumber: plain.rollNumber },
+        { admissionNumber: plain.admissionNumber || plain.rollNumber }
+      ]
+    }).lean();
+  } catch (userErr) {
+    console.warn('Error fetching User for student stay fee:', userErr.message);
+  }
+
+  const { getDefaultAcademicYear } = await import('../utils/roomOccupancyUtils.js');
+  const rawAcademicYear = studentUser?.academicYear || plain.batch || getDefaultAcademicYear();
+  const academicYear = toFeesAcademicYear(rawAcademicYear);
+  const feeHeadId = await resolveHostelFeeHeadId();
+  const StudentFee = getStudentFeeModel();
+
+  // If student has free pricing or is inactive, stay fee is 0, otherwise calculatedCharges
+  const stayFeeAmount = (plain.entryPricing === 'free' || plain.isActive === false)
+    ? 0 
+    : Number(plain.calculatedCharges || 0);
+
+  // Check if an existing StudentFee record exists for this student & academicYear under HST01
+  const existingFee = await StudentFee.findOne({
+    studentId,
+    feeHead: feeHeadId,
+    academicYear
+  });
+
+  const studentYear = Number(studentUser?.year || plain.year || 1);
+  const branch = String(studentUser?.branch || plain.branchName || '').trim();
+  const college = resolveCollegeName(studentUser) || plain.collegeName || '';
+  const course = String(studentUser?.course || plain.courseName || '').trim();
+  const studentName = String(studentUser?.name || plain.name || '').trim();
+
+  let finalAmount = stayFeeAmount;
+  let remarksText = `Staff & Guest Stay Fee (${plain.stayType || 'short-term'} stay)`;
+
+  if (existingFee) {
+    const previousStayFee = Number(plain.lastSyncedStayFee || 0);
+    finalAmount = Math.max(0, Number(existingFee.amount || 0) - previousStayFee + stayFeeAmount);
+    remarksText = existingFee.remarks 
+      ? `${existingFee.remarks} | Stay Fee: ₹${stayFeeAmount}`
+      : remarksText;
+    
+    existingFee.amount = finalAmount;
+    existingFee.remarks = remarksText;
+    existingFee.updatedAt = new Date();
+    await existingFee.save();
+    console.log(`✅ [Fees DB] Updated existing StudentFee for ${studentId}: new amount ₹${finalAmount}`);
+  } else {
+    await StudentFee.findOneAndUpdate(
+      {
+        studentId,
+        feeHead: feeHeadId,
+        academicYear
+      },
+      {
+        $set: {
+          academicYear,
+          feeHead: feeHeadId,
+          structureId: null,
+          semester: null,
+          termNumber: null,
+          studentId,
+          studentYear,
+          amount: finalAmount,
+          branch,
+          college,
+          course,
+          isActive: true,
+          remarks: remarksText,
+          isScholarshipApplicable: false,
+          isTermsDivided: true,
+          stud_type: 'CONV',
+          studentName,
+          updatedAt: new Date()
+        },
+        $setOnInsert: { createdAt: new Date() }
+      },
+      { upsert: true, new: true, runValidators: false }
+    );
+    console.log(`✅ [Fees DB] Created StudentFee row for ${studentId}: amount ₹${finalAmount}`);
+  }
+
+  // Update lastSyncedStayFee on StaffGuest
+  try {
+    const StaffGuest = (await import('../models/StaffGuest.js')).default;
+    await StaffGuest.updateOne(
+      { _id: plain._id },
+      { $set: { lastSyncedStayFee: stayFeeAmount } }
+    );
+  } catch (sgErr) {
+    console.warn('Could not update lastSyncedStayFee on StaffGuest:', sgErr.message);
+  }
+
+  return { ok: true, studentId, amount: finalAmount };
+};
+
+export const syncStudentGuestStayFeeSafely = async (staffGuestDoc) => {
+  try {
+    const result = await syncStudentGuestStayFee(staffGuestDoc);
+    if (result.ok) {
+      console.log(`✅ Fees DB synced for student stay — studentId ${result.studentId}`);
+    }
+    return result;
+  } catch (error) {
+    console.error('❌ Fees DB student stay fee sync failed:', error.message);
+    return { ok: false, error: error.message };
+  }
+};
+

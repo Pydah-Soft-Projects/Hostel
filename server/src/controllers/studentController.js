@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import StaffGuest from '../models/StaffGuest.js';
 import Counter from '../models/Counter.js';
 import { uploadToS3, deleteFromS3 } from '../utils/s3Service.js';
 import { sendAdminCredentialsSMS } from '../utils/smsService.js';
@@ -571,6 +572,58 @@ export const getStudentCountReport = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error generating report',
+      error: error.message
+    });
+  }
+};
+
+// Get guest / short-term stay fee details for the logged-in student
+export const getStudentGuestStayFee = async (req, res) => {
+  try {
+    const student = req.user;
+    if (!student) {
+      return res.status(401).json({ success: false, message: 'Not authenticated' });
+    }
+
+    const identifiers = [student.rollNumber, student.admissionNumber].filter(Boolean);
+    if (identifiers.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          stays: [],
+          totalStayCharges: 0,
+          hasStayFee: false
+        }
+      });
+    }
+
+    const stays = await StaffGuest.find({
+      type: 'student',
+      isActive: true,
+      $or: [
+        { rollNumber: { $in: identifiers } },
+        { admissionNumber: { $in: identifiers } }
+      ]
+    }).sort({ createdAt: -1 });
+
+    const totalStayCharges = stays.reduce((sum, s) => {
+      const charge = s.calculatedCharges || (['monthly_fixed', 'fixed', 'fixed_rate'].includes(s.chargeType) ? (s.monthlyFixedAmount || 0) : 0) || 0;
+      return sum + charge;
+    }, 0);
+
+    res.json({
+      success: true,
+      data: {
+        stays,
+        totalStayCharges,
+        hasStayFee: stays.length > 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching student guest stay fee:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student stay fee',
       error: error.message
     });
   }

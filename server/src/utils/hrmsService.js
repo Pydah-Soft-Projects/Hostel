@@ -164,10 +164,12 @@ export const searchHrmsEmployees = async (query) => {
       hrmsEmployeeRef: emp._id.toString(),
       hrmsUserId: null,
       name: emp.employee_name || '',
+      gender: emp.gender || '',
       email: emp.email || '',
       phone: emp.phone_number || '',
       department: emp.dynamicFields?.department_name || '',
       designation: emp.dynamicFields?.designation_name || '',
+      profilePhoto: emp.profilePhoto || '',
       hasPassword: !!(emp.password || emp.plain_password),
       label: 'Employee Record'
     });
@@ -182,10 +184,12 @@ export const searchHrmsEmployees = async (query) => {
       hrmsUserId: user._id.toString(),
       hrmsEmployeeRef: user.employeeRef?.toString() || '',
       name: user.name || '',
+      gender: '',
       email: user.email || '',
       phone: user.phone_number || '',
       department: '',
       designation: '',
+      profilePhoto: user.profilePhoto || '',
       hasPassword: !!user.password,
       label: 'User Account'
     });

@@ -10,7 +10,8 @@ import {
   updateProfile,
   getProfile,
   updateProfilePhotos,
-  getStudentCountReport
+  getStudentCountReport,
+  getStudentGuestStayFee
 } from '../controllers/studentController.js';
 import { renewBatches } from '../controllers/adminController.js';
 
@@ -57,5 +58,8 @@ router.put('/profile/photos', authenticateStudent, imageUpload.fields([
   { name: 'guardianPhoto1', maxCount: 1 },
   { name: 'guardianPhoto2', maxCount: 1 }
 ]), updateProfilePhotos);
+
+// Guest / short-term stay fee for student
+router.get('/guest-stay-fee', authenticateStudent, getStudentGuestStayFee);
 
 export default router; 

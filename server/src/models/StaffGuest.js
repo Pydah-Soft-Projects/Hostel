@@ -169,6 +169,15 @@ const staffGuestSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  entryPricing: {
+    type: String,
+    enum: ['free', 'charged'],
+    default: 'charged'
+  },
+  lastSyncedStayFee: {
+    type: Number,
+    default: 0
+  },
   isActive: {
     type: Boolean,
     default: true
