@@ -369,7 +369,7 @@ export const getStaffGuests = async (req, res, next) => {
       query.type = type.trim();
     }
     if (gender && gender.trim() !== '' && gender !== 'all') {
-      query.gender = gender.trim();
+      query.gender = new RegExp(`^${gender.trim()}$`, 'i');
     }
     if (department && department.trim() !== '' && department !== 'all') {
       query.department = department.trim();

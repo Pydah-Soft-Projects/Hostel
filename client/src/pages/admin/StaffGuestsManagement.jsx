@@ -137,6 +137,7 @@ const StaffGuestsManagement = () => {
     date: new Date().toISOString().split('T')[0],
     type: 'all',
     department: 'all',
+    gender: 'all',
     status: 'all'
   });
   const [attendanceSearchTerm, setAttendanceSearchTerm] = useState('');
@@ -349,6 +350,7 @@ const StaffGuestsManagement = () => {
         date: attendanceFilters.date,
         ...(attendanceFilters.type !== 'all' && { type: attendanceFilters.type }),
         ...(attendanceFilters.department !== 'all' && { department: attendanceFilters.department }),
+        ...(attendanceFilters.gender && attendanceFilters.gender !== 'all' && { gender: attendanceFilters.gender }),
         ...(attendanceFilters.status !== 'all' && { status: attendanceFilters.status }),
         ...(attendanceSearchTerm && { search: attendanceSearchTerm })
       });
@@ -1911,7 +1913,7 @@ const StaffGuestsManagement = () => {
               
 
               {/* Filter Dropdowns Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
                 {/* 1. Person Type */}
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
@@ -1933,7 +1935,27 @@ const StaffGuestsManagement = () => {
                   </select>
                 </div>
 
-                {/* 2. Check-In Status */}
+                {/* 2. Gender */}
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={filterGender}
+                    onChange={(e) => {
+                      setFilterGender(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    <option value="all">All Genders</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* 3. Check-In Status */}
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
                     Check-In Status
@@ -2340,6 +2362,16 @@ const StaffGuestsManagement = () => {
                     <option value="Maintenance">Maintenance</option>
                     <option value="Cleaning">Cleaning</option>
                     <option value="Kitchen">Kitchen</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <select
+                    value={attendanceFilters.gender || 'all'}
+                    onChange={(e) => handleAttendanceFilterChange('gender', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="all">All Genders</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
                     <option value="Other">Other</option>
                   </select>
                   <select
