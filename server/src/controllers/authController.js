@@ -370,8 +370,8 @@ export const validate = async (req, res, next) => {
     // For admins and others, just return req.user
     const userResponse = req.user.toObject ? req.user.toObject() : { ...req.user };
     
-    // NEW LOGIC: Inject assignedCourses AND CollegeDetails for Principals based on assignedCollegeIds (for page refreshes)
-    if (req.user.role === 'principal' && req.user.assignedCollegeIds && req.user.assignedCollegeIds.length > 0) {
+    // NEW LOGIC: Inject assignedCourses AND CollegeDetails for Principals & Users based on assignedCollegeIds (for page refreshes)
+    if (['principal', 'sub_admin', 'custom'].includes(req.user.role) && req.user.assignedCollegeIds && req.user.assignedCollegeIds.length > 0) {
       try {
         const { fetchCoursesFromSQL, fetchCollegesFromSQL } = await import('../utils/sqlService.js');
         
@@ -390,20 +390,19 @@ export const validate = async (req, res, next) => {
            console.log(`🎓 [Validate] Injected ${userResponse.assignedCollegeDetails.length} college details`);
         }
 
-        // 2. Fetch and inject Assigned Courses (existing logic)
-        const sqlCoursesResult = await fetchCoursesFromSQL();
+        // 2. Fetch and inject Assigned Courses and Branches
+        const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+        const scope = await getAdminScopedAcademics(req.user);
         
-        if (sqlCoursesResult.success) {
-           const allCourses = sqlCoursesResult.data;
-           
-           // Filter courses that match College IDs AND Levels
-           const derivedCourses = await getAllowedCourseNames(req.user);
-           console.log(`🎓 [Validate] Derived ${derivedCourses.length} courses from colleges for principal`);
-           
-           userResponse.assignedCourses = derivedCourses;
-           if (derivedCourses.length > 0) {
-             userResponse.course = derivedCourses[0];
-           }
+        userResponse.assignedCourses = (req.user.assignedCourses && req.user.assignedCourses.length > 0)
+          ? req.user.assignedCourses
+          : (scope.allowedCourses || []);
+        userResponse.assignedBranches = (req.user.assignedBranches && req.user.assignedBranches.length > 0)
+          ? req.user.assignedBranches
+          : (scope.allowedBranches || []);
+          
+        if (userResponse.assignedCourses.length > 0 && !userResponse.course) {
+          userResponse.course = userResponse.assignedCourses[0];
         }
       } catch (err) {
          console.error('🎓 [Validate] Error generating courses/colleges from colleges:', err);

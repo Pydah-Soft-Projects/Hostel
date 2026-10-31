@@ -724,7 +724,10 @@ export const fetchStudentsForAcademicYear = async ({
   const hasAcademicFilter = !!(
     academicFilters.course ||
     academicFilters.branch ||
-    academicFilters.year
+    academicFilters.year ||
+    (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+    (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0) ||
+    (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0)
   );
 
   let categoryIds = null;

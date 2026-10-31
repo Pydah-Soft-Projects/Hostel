@@ -12,7 +12,10 @@ import {
   UserIcon,
   AcademicCapIcon,
   PhoneIcon,
-  ArrowRightIcon
+  ArrowRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import SEO from '../../components/SEO';
 
@@ -26,6 +29,21 @@ const formatDateIndia = (value) => value
     year: 'numeric'
   })
   : '—';
+
+const formatDateDash = (value) => {
+  if (!value) return '—';
+  const parts = String(value).slice(0, 10).split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return formatDateIndia(value);
+};
+
+const getWeekdayIndia = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short' });
+};
 
 const formatDateTimeIndia = (value) => value
   ? new Date(value).toLocaleString('en-IN', {
@@ -67,6 +85,31 @@ const LeaveManagement = () => {
   const [approvalDateRange, setApprovalDateRange] = useState(getDefaultApprovalDateRange);
   const [approvalSummary, setApprovalSummary] = useState([]);
   const [approvalSummaryLoading, setApprovalSummaryLoading] = useState(false);
+  const [expandedTypes, setExpandedTypes] = useState(new Set());
+
+  const toggleType = (typeKey) => {
+    setExpandedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(typeKey)) {
+        next.delete(typeKey);
+      } else {
+        next.add(typeKey);
+      }
+      return next;
+    });
+  };
+
+  const handleExpandAllTypes = () => {
+    setExpandedTypes(new Set(['Leave', 'Permission', 'Stay in Hostel', 'total']));
+  };
+
+  const handleCollapseAllTypes = () => {
+    setExpandedTypes(new Set());
+  };
+
+  const sortedDays = useMemo(() => {
+    return [...(approvalSummary.days || [])].sort((a, b) => a.date.localeCompare(b.date));
+  }, [approvalSummary.days]);
 
   // Debounce filters to reduce API calls
   const debouncedFilters = useDebounce(filters, 500);
@@ -414,91 +457,98 @@ const LeaveManagement = () => {
             </p>
 
             {/* Mobile Filter Toggle - Below Heading */}
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="lg:hidden flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium mt-3"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              <span>Filters</span>
-              <svg className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Filters - Collapsible on Mobile */}
-          <div className={`${showFilters ? 'block' : 'hidden'} lg:block w-full lg:w-auto`}>
-            <div className="flex flex-col gap-3 sm:gap-4 bg-gray-50 lg:bg-transparent p-3 lg:p-0 rounded-lg lg:rounded-none mt-3 lg:mt-0">
-              {/* Date Range Filters */}
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">From:</label>
-                  <input
-                    type="date"
-                    lang="en-IN"
-                    value={filters.fromDate}
-                    onChange={e => setFilters(f => ({ ...f, fromDate: e.target.value, page: 1 }))}
-                    className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">To:</label>
-                  <input
-                    type="date"
-                    lang="en-IN"
-                    value={filters.toDate}
-                    onChange={e => setFilters(f => ({ ...f, toDate: e.target.value, page: 1 }))}
-                    className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
-                  />
-                </div>
-              </div>
-
-              {/* Dropdown Filters */}
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <select
-                  value={filters.applicationType}
-                  onChange={(e) => setFilters({ ...filters, applicationType: e.target.value, page: 1 })}
-                  className="flex-1 px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
-                >
-                  <option value="">All Types</option>
-                  <option value="Leave">Leave</option>
-                  <option value="Permission">Permission</option>
-                </select>
-                <select
-                  value={filters.status}
-                  onChange={(e) => setFilters({ ...filters, status: e.target.value, page: 1 })}
-                  className="flex-1 px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
-                >
-                  <option value="">All Status</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Pending OTP Verification">Pending OTP</option>
-                  <option value="Warden Verified">Warden Verified</option>
-                  <option value="Principal Approved">Principal Approved</option>
-                  <option value="Approved">Approved</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-              </div>
-
-              {/* Clear Filters Button - Mobile Only */}
+            {activeTab !== 'approval-abstract' && (
               <button
-                onClick={() => {
-                  setFilters({
-                    status: 'Pending OTP Verification',
-                    applicationType: '',
-                    page: 1,
-                    fromDate: '',
-                    toDate: ''
-                  });
-                  setShowFilters(false);
-                }}
-                className="lg:hidden px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-xs font-medium"
+                onClick={() => setShowFilters(!showFilters)}
+                className="lg:hidden flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium mt-3"
               >
-                Clear Filters
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                <span>Filters</span>
+                <svg className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-            </div>
+            )}
           </div>
+
+          {/* Filters - Collapsible on Mobile (Hidden on Leave Abstract tab) */}
+          {activeTab !== 'approval-abstract' && (
+            <div className={`${showFilters ? 'block' : 'hidden'} lg:block w-full lg:w-auto`}>
+              <div className="flex flex-col gap-3 sm:gap-4 bg-gray-50 lg:bg-transparent p-3 lg:p-0 rounded-lg lg:rounded-none mt-3 lg:mt-0">
+                {/* Date Range Filters */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">From:</label>
+                    <input
+                      type="date"
+                      lang="en-IN"
+                      value={filters.fromDate}
+                      onChange={e => setFilters(f => ({ ...f, fromDate: e.target.value, page: 1 }))}
+                      className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">To:</label>
+                    <input
+                      type="date"
+                      lang="en-IN"
+                      value={filters.toDate}
+                      onChange={e => setFilters(f => ({ ...f, toDate: e.target.value, page: 1 }))}
+                      className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Dropdown Filters */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                  <select
+                    value={filters.applicationType}
+                    onChange={(e) => setFilters({ ...filters, applicationType: e.target.value, page: 1 })}
+                    className="flex-1 px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                  >
+                    <option value="">All Types</option>
+                    <option value="Leave">Leave</option>
+                    <option value="Permission">Permission</option>
+                  </select>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value, page: 1 })}
+                    className="flex-1 px-2 sm:px-3 py-1 sm:py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs sm:text-sm"
+                  >
+                    <option value="">All Status</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Pending OTP Verification">Pending OTP</option>
+                    <option value="Warden Verified">Warden Verified</option>
+                    <option value="Principal Approved">Principal Approved</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+
+                  {/* Clear Filters Button (Desktop & Mobile) */}
+                  {(filters.fromDate || filters.toDate || filters.applicationType || filters.status) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilters({
+                          status: '',
+                          applicationType: '',
+                          page: 1,
+                          fromDate: '',
+                          toDate: ''
+                        });
+                        setShowFilters(false);
+                      }}
+                      className="px-3 py-1 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-lg transition-colors text-xs font-medium self-center"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -530,7 +580,7 @@ const LeaveManagement = () => {
               : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
           >
-            Approval Abstract
+            Leave Abstract
           </button>
         </div>
 
@@ -568,8 +618,13 @@ const LeaveManagement = () => {
                             <span className={`inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-xs font-medium border ${getApplicationTypeColor(leave.applicationType)}`}>
                               {leave.applicationType}
                             </span>
-                            <span className="text-xs sm:text-sm text-gray-500">
-                              {formatDateIndia(leave.createdAt)}
+                            <span className="text-xs sm:text-sm text-gray-500 font-medium">
+                              {formatDateIndia(
+                                leave.applicationType === 'Leave' ? leave.startDate :
+                                leave.applicationType === 'Permission' ? leave.permissionDate :
+                                leave.applicationType === 'Stay in Hostel' ? leave.stayDate :
+                                leave.createdAt
+                              )}
                             </span>
                           </div>
 
@@ -880,7 +935,7 @@ const LeaveManagement = () => {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Daily Request Abstract</h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Requests submitted and processed from {formatDateIndia(approvalDateRange.fromDate)} to {formatDateIndia(approvalDateRange.toDate)} (IST).
+                  Leave & permission requests for dates from {formatDateIndia(approvalDateRange.fromDate)} to {formatDateIndia(approvalDateRange.toDate)} (IST).
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full sm:w-auto">
@@ -960,74 +1015,288 @@ const LeaveManagement = () => {
                     </div>
                   </div>
 
-                  <h3 className="mb-2 text-sm font-semibold text-gray-900">Day-wise Summary</h3>
-                  <div className="mb-5 overflow-x-auto rounded-lg border border-gray-200">
-                    <table className="min-w-[720px] w-full divide-y divide-gray-200 text-left">
-                      <thead className="bg-gray-50">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">Request Abstract & Type Breakdown</h3>
+                      <p className="text-xs text-gray-500">
+                        Dates are displayed horizontally in columns. Click on any request type row to expand its pending, approved, and rejected breakdown across dates.
+                      </p>
+                    </div>
+                    {sortedDays.length > 0 && (
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={handleExpandAllTypes}
+                          className="px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200"
+                        >
+                          Expand All Types
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCollapseAllTypes}
+                          className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors border border-gray-200"
+                        >
+                          Collapse All Types
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm bg-white">
+                    <table className="min-w-full divide-y divide-gray-200 text-left border-collapse">
+                      <thead className="bg-gray-50 text-gray-700">
                         <tr>
-                          <th className="px-3 py-2.5 text-xs font-semibold uppercase text-gray-500">Date</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Requests</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Pending</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Processed</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Approved</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Rejected</th>
+                          <th className="sticky left-0 z-20 bg-gray-50 px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-700 border-r border-b border-gray-200 min-w-[200px] shadow-xs">
+                            Request Type
+                          </th>
+                          {sortedDays.map((day) => {
+                            const weekday = getWeekdayIndia(day.date);
+                            return (
+                              <th
+                                key={day.date}
+                                className="px-3 py-3 text-right font-semibold text-gray-700 bg-gray-50 border-r border-b border-gray-200 select-none min-w-[125px]"
+                              >
+                                <div className="flex flex-col items-end">
+                                  <span className="text-xs font-bold text-gray-900">{formatDateDash(day.date)}</span>
+                                  {weekday && <span className="text-[11px] text-gray-500 font-normal">({weekday})</span>}
+                                </div>
+                              </th>
+                            );
+                          })}
+                          <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-800 bg-gray-100 border-l border-b border-gray-200 min-w-[110px]">
+                            Overall Total
+                          </th>
                         </tr>
                       </thead>
+
                       <tbody className="divide-y divide-gray-100 bg-white">
-                        {(approvalSummary.days || []).map(day => (
-                          <tr key={day.date} className="hover:bg-gray-50">
-                            <td className="px-3 py-3 text-sm font-medium text-gray-900">{formatDateIndia(day.date)}</td>
-                            <td className="px-3 py-3 text-right text-sm text-gray-800">{day.requests}</td>
-                            <td className="px-3 py-3 text-right text-sm text-amber-700">{day.pending}</td>
-                            <td className="px-3 py-3 text-right text-sm text-blue-700">{day.processed}</td>
-                            <td className="px-3 py-3 text-right text-sm text-green-700">{day.approved}</td>
-                            <td className="px-3 py-3 text-right text-sm text-red-700">{day.rejected}</td>
-                          </tr>
-                        ))}
-                        {!(approvalSummary.days || []).length && (
+                        {[
+                          { key: 'Leave', label: 'Leave', color: 'bg-blue-600' },
+                          { key: 'Permission', label: 'Permission', color: 'bg-indigo-600' },
+                          { key: 'Stay in Hostel', label: 'Stay in Hostel', color: 'bg-emerald-600' }
+                        ].map((rt) => {
+                          const isExpanded = expandedTypes.has(rt.key);
+                          const overallItem = (approvalSummary.byType || []).find((t) => t.applicationType === rt.key) || {
+                            requests: 0,
+                            pending: 0,
+                            approved: 0,
+                            rejected: 0
+                          };
+
+                          return (
+                            <tr
+                              key={rt.key}
+                              onClick={() => toggleType(rt.key)}
+                              className={`cursor-pointer transition-colors duration-150 select-none ${
+                                isExpanded ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              {/* Sticky Request Type Column - Clean, no status labels */}
+                              <td className="sticky left-0 z-10 bg-white px-4 py-3 text-sm font-semibold text-gray-900 border-r border-b border-gray-200 shadow-xs">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform ${
+                                      isExpanded ? 'rotate-90 text-blue-600 bg-blue-100' : 'text-gray-400 bg-gray-100'
+                                    }`}
+                                  >
+                                    <ChevronRightIcon className="w-3.5 h-3.5" />
+                                  </span>
+                                  <span className={`w-2.5 h-2.5 rounded-full ${rt.color}`} />
+                                  <span className="font-semibold text-gray-900">{rt.label}</span>
+                                </div>
+                              </td>
+
+                              {/* Date Columns - Pending, Approved, Rejected displayed directly in this date column */}
+                              {sortedDays.map((day) => {
+                                const data = (day.byType || []).find((t) => t.applicationType === rt.key) || {
+                                  requests: 0,
+                                  pending: 0,
+                                  approved: 0,
+                                  rejected: 0
+                                };
+
+                                return (
+                                  <td
+                                    key={day.date}
+                                    className={`px-3 py-3 border-r border-b border-gray-200 transition-colors ${
+                                      isExpanded ? 'bg-blue-50/20' : ''
+                                    }`}
+                                  >
+                                    {isExpanded ? (
+                                      <div className="flex flex-col gap-1 py-0.5 text-xs">
+                                        <div className="flex items-center justify-between gap-1.5 text-gray-700 font-semibold border-b border-gray-200 pb-0.5">
+                                          <span>Total:</span>
+                                          <span className="font-bold text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded">{data.requests}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1.5 text-amber-800">
+                                          <span className="flex items-center gap-1 font-medium">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                            Pending:
+                                          </span>
+                                          <span className="font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">{data.pending}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1.5 text-green-800">
+                                          <span className="flex items-center gap-1 font-medium">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                            Approved:
+                                          </span>
+                                          <span className="font-bold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{data.approved}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1.5 text-red-800">
+                                          <span className="flex items-center gap-1 font-medium">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                            Rejected:
+                                          </span>
+                                          <span className="font-bold bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">{data.rejected}</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="text-right text-sm font-semibold text-gray-800">
+                                        {data.requests}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+
+                              {/* Overall Total Column */}
+                              <td
+                                className={`px-4 py-3 text-right text-sm font-bold text-gray-900 bg-gray-50/70 border-l border-b border-gray-200 ${
+                                  isExpanded ? 'bg-blue-50/30' : ''
+                                }`}
+                              >
+                                {isExpanded ? (
+                                  <div className="flex flex-col gap-1 py-0.5 text-xs">
+                                    <div className="flex items-center justify-between gap-1.5 text-gray-700 font-semibold border-b border-gray-200 pb-0.5">
+                                      <span>Total:</span>
+                                      <span className="font-bold text-gray-900 bg-gray-200 px-1.5 py-0.5 rounded">{overallItem.requests}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-amber-800">
+                                      <span className="font-medium">Pending:</span>
+                                      <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{overallItem.pending}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-green-800">
+                                      <span className="font-medium">Approved:</span>
+                                      <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{overallItem.approved}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-red-800">
+                                      <span className="font-medium">Rejected:</span>
+                                      <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{overallItem.rejected}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>{overallItem.requests}</div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        {!sortedDays.length && (
                           <tr>
-                            <td colSpan="6" className="px-3 py-6 text-center text-sm text-gray-500">No requests in this date range.</td>
+                            <td colSpan={2} className="px-4 py-8 text-center text-sm text-gray-500">
+                              No requests in this date range.
+                            </td>
                           </tr>
                         )}
                       </tbody>
-                    </table>
-                  </div>
 
-                  <h3 className="mb-2 text-sm font-semibold text-gray-900">Request Type Breakdown</h3>
-                  <div className="overflow-x-auto rounded-lg border border-gray-200">
-                    <table className="min-w-[720px] w-full divide-y divide-gray-200 text-left">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2.5 text-xs font-semibold uppercase text-gray-500">Request Type</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Total Requests</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Pending</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Processed</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Approved</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Rejected</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 bg-white">
-                        {(approvalSummary.byType || []).map(item => (
-                          <tr key={item.applicationType} className="hover:bg-gray-50">
-                            <td className="px-3 py-3 text-sm font-medium text-gray-900">{item.applicationType}</td>
-                            <td className="px-3 py-3 text-right text-sm text-gray-800">{item.requests}</td>
-                            <td className="px-3 py-3 text-right text-sm text-amber-700">{item.pending}</td>
-                            <td className="px-3 py-3 text-right text-sm text-blue-700">{item.processed}</td>
-                            <td className="px-3 py-3 text-right text-sm text-green-700">{item.approved}</td>
-                            <td className="px-3 py-3 text-right text-sm text-red-700">{item.rejected}</td>
+                      {sortedDays.length > 0 && (
+                        <tfoot className="border-t-2 border-gray-300">
+                          {/* Total Requests Main Row */}
+                          <tr
+                            onClick={() => toggleType('total')}
+                            className="bg-gray-50 hover:bg-blue-50/30 cursor-pointer font-bold select-none transition-colors"
+                          >
+                            <td className="sticky left-0 z-10 bg-gray-100 px-4 py-3 text-sm font-bold text-gray-900 border-r border-gray-200 shadow-xs">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform ${
+                                    expandedTypes.has('total') ? 'rotate-90 text-blue-600 bg-blue-100' : 'text-gray-400 bg-gray-100'
+                                  }`}
+                                >
+                                  <ChevronRightIcon className="w-3.5 h-3.5" />
+                                </span>
+                                <span>Total Requests</span>
+                              </div>
+                            </td>
+
+                            {/* Date columns breakdown for Total Requests */}
+                            {sortedDays.map((day) => (
+                              <td
+                                key={day.date}
+                                className={`px-3 py-3 border-r border-gray-200 transition-colors ${
+                                  expandedTypes.has('total') ? 'bg-blue-100/30' : 'bg-blue-50/50'
+                                }`}
+                              >
+                                {expandedTypes.has('total') ? (
+                                  <div className="flex flex-col gap-1 py-0.5 text-xs">
+                                    <div className="flex items-center justify-between gap-1.5 text-blue-900 font-bold border-b border-blue-200 pb-0.5">
+                                      <span>Total:</span>
+                                      <span className="font-bold text-blue-900 bg-blue-200 px-1.5 py-0.5 rounded">{day.requests}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-amber-800">
+                                      <span className="flex items-center gap-1 font-bold">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        Pending:
+                                      </span>
+                                      <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{day.pending}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-green-800">
+                                      <span className="flex items-center gap-1 font-bold">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                        Approved:
+                                      </span>
+                                      <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{day.approved}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1.5 text-red-800">
+                                      <span className="flex items-center gap-1 font-bold">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                        Rejected:
+                                      </span>
+                                      <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{day.rejected}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-right text-sm font-bold text-blue-900">
+                                    {day.requests}
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+
+                            {/* Overall Total for Total Requests */}
+                            <td
+                              className={`px-4 py-3 text-right text-sm font-extrabold text-blue-950 bg-blue-100/80 border-l border-gray-200 ${
+                                expandedTypes.has('total') ? 'bg-blue-200/50' : ''
+                              }`}
+                            >
+                              {expandedTypes.has('total') ? (
+                                <div className="flex flex-col gap-1 py-0.5 text-xs">
+                                  <div className="flex items-center justify-between gap-1.5 text-blue-950 font-bold border-b border-blue-300 pb-0.5">
+                                    <span>Total:</span>
+                                    <span className="font-bold bg-blue-200 px-1.5 py-0.5 rounded">{approvalSummary.totals?.requests || 0}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1.5 text-amber-900">
+                                    <span className="font-bold">Pending:</span>
+                                    <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.pending || 0}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1.5 text-green-900">
+                                    <span className="font-bold">Approved:</span>
+                                    <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.approved || 0}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1.5 text-red-900">
+                                    <span className="font-bold">Rejected:</span>
+                                    <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.rejected || 0}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>{approvalSummary.totals?.requests || 0}</div>
+                              )}
+                            </td>
                           </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-3 text-sm font-semibold text-gray-800">Total</th>
-                          <th className="px-3 py-3 text-right text-sm font-semibold text-gray-800">{approvalSummary.totals?.requests || 0}</th>
-                          <th className="px-3 py-3 text-right text-sm font-semibold text-amber-700">{approvalSummary.totals?.pending || 0}</th>
-                          <th className="px-3 py-3 text-right text-sm font-semibold text-blue-700">{approvalSummary.totals?.processed || 0}</th>
-                          <th className="px-3 py-3 text-right text-sm font-semibold text-green-700">{approvalSummary.totals?.approved || 0}</th>
-                          <th className="px-3 py-3 text-right text-sm font-semibold text-red-700">{approvalSummary.totals?.rejected || 0}</th>
-                        </tr>
-                      </tfoot>
+                        </tfoot>
+                      )}
                     </table>
                   </div>
                   {!approvalSummary.totals?.requests && !approvalSummary.totals?.processed && (

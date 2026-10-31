@@ -80,7 +80,11 @@ const adminSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
-  // New College & Level based assignment
+  assignedBranches: [{
+    type: String,
+    trim: true
+  }],
+  // College, Course, Level & Branch based assignment
   assignedCollegeIds: [{
     type: Number,
     required: false
@@ -90,6 +94,14 @@ const adminSchema = new mongoose.Schema({
     levels: [{
       type: String,
       enum: ['diploma', 'ug', 'pg'],
+      trim: true
+    }],
+    courses: [{
+      type: String,
+      trim: true
+    }],
+    branches: [{
+      type: String,
       trim: true
     }]
   }],

@@ -850,7 +850,7 @@ const AdminDashboard = () => {
               <div className="flex items-center justify-between">
                 <div className="text-xs text-gray-500 truncate">
                   {user?.role === 'super_admin' ? 'Super Admin'
-                    : user?.role === 'sub_admin' ? 'Sub Admin'
+                    : user?.role === 'sub_admin' ? 'User'
                     : user?.role === 'custom' ? (user?.customRole || 'Custom Role')
                     : user?.role === 'warden' ? 'Warden'
                     : user?.role === 'principal' ? 'Principal'

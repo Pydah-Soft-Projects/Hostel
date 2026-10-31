@@ -1,4 +1,7 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
+import Admin from '../models/Admin.js';
+import { getAdminScopedAcademics } from '../utils/adminUtils.js';
 import Course from '../models/Course.js';
 import Branch from '../models/Branch.js';
 import AcademicCalendar from '../models/AcademicCalendar.js';
@@ -6,6 +9,25 @@ import { superAdminAuth, protect, adminAuth, checkPermission } from '../middlewa
 import { getCoursesFromSQL, getBranchesFromSQL, getBranchesByCourseFromSQL } from '../utils/courseBranchMapper.js';
 
 const router = express.Router();
+
+const getScopedAdminFromRequest = async (req) => {
+  try {
+    let token;
+    if (req.headers.authorization?.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+    if (!token) return null;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded._id || decoded.id || decoded.userId;
+    if (!userId) return null;
+    const admin = await Admin.findById(userId).select('-password');
+    if (!admin || !admin.isActive || admin.role === 'super_admin') return null;
+    const scope = await getAdminScopedAcademics(admin);
+    return scope.isScoped ? scope : null;
+  } catch (e) {
+    return null;
+  }
+};
 
 // Middleware for course management permission (allows super_admin or sub-admin with course_management permission)
 const courseManagementAuth = [adminAuth, (req, res, next) => {
@@ -64,9 +86,14 @@ router.get('/colleges', async (req, res) => {
     const result = await fetchCollegesFromSQL();
     
     if (result.success) {
+      let data = result.data || [];
+      const scope = await getScopedAdminFromRequest(req);
+      if (scope?.allowedCollegeIds?.length > 0) {
+        data = data.filter(c => scope.allowedCollegeIds.includes(Number(c.id)));
+      }
       res.json({
         success: true,
-        data: result.data
+        data
       });
     } else {
       res.status(500).json({
@@ -92,7 +119,7 @@ router.get('/courses', async (req, res) => {
     const courses = await getCoursesFromSQL();
     
     // Map to expected format (already done in mapper, but ensure compatibility)
-    const formattedCourses = courses.map(course => ({
+    let formattedCourses = courses.map(course => ({
       _id: course._id,
       sqlId: course.sqlId,
       name: course.name,
@@ -104,6 +131,20 @@ router.get('/courses', async (req, res) => {
       college: course.college,
       level: course.level
     }));
+
+    const scope = await getScopedAdminFromRequest(req);
+    if (scope) {
+      if (scope.allowedCollegeIds?.length > 0) {
+        formattedCourses = formattedCourses.filter(c => {
+          const colId = c.college?.id != null ? Number(c.college.id) : (c.college != null ? Number(c.college) : null);
+          return colId && scope.allowedCollegeIds.includes(colId);
+        });
+      }
+      if (scope.allowedCourses?.length > 0) {
+        const allowedLower = scope.allowedCourses.map(x => x.trim().toLowerCase());
+        formattedCourses = formattedCourses.filter(c => allowedLower.includes((c.name || '').trim().toLowerCase()));
+      }
+    }
     
     res.json({
       success: true,
@@ -355,7 +396,7 @@ router.get('/branches', async (req, res) => {
     const branches = await getBranchesFromSQL();
     
     // Map to expected format with course info
-    const formattedBranches = branches.map(branch => ({
+    let formattedBranches = branches.map(branch => ({
       _id: branch._id,
       sqlId: branch.sqlId,
       name: branch.name,
@@ -363,13 +404,36 @@ router.get('/branches', async (req, res) => {
       description: branch.description || '',
       metadata: branch.metadata || {},
       additionalYears: branch.additionalYears || [],
+      college: branch.college,
       course: branch.course ? {
         _id: branch.course,
         name: branch.courseName,
         code: branch.courseCode
       } : null,
+      courseName: branch.courseName,
       isActive: branch.isActive
     }));
+
+    const scope = await getScopedAdminFromRequest(req);
+    if (scope) {
+      if (scope.allowedCollegeIds?.length > 0) {
+        formattedBranches = formattedBranches.filter(b => {
+          const colId = b.college?.id != null ? Number(b.college.id) : (b.college != null ? Number(b.college) : null);
+          return !colId || scope.allowedCollegeIds.includes(colId);
+        });
+      }
+      if (scope.allowedCourses?.length > 0) {
+        const allowedLower = scope.allowedCourses.map(x => x.trim().toLowerCase());
+        formattedBranches = formattedBranches.filter(b => {
+          const cName = (b.course?.name || b.courseName || '').trim().toLowerCase();
+          return !cName || allowedLower.includes(cName);
+        });
+      }
+      if (scope.allowedBranches?.length > 0) {
+        const allowedBLower = scope.allowedBranches.map(x => x.trim().toLowerCase());
+        formattedBranches = formattedBranches.filter(b => allowedBLower.includes((b.name || '').trim().toLowerCase()));
+      }
+    }
     
     res.json({
       success: true,

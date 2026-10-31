@@ -181,7 +181,7 @@ const StudentRegistrationSQL = () => {
     fetchCourses();
     fetchColleges();
     fetchHostels();
-  }, []);
+  }, [user]);
 
   // Fetch hostels
   const fetchHostels = async () => {
@@ -228,7 +228,18 @@ const StudentRegistrationSQL = () => {
     try {
       const res = await api.get('/api/course-management/courses');
       if (res.data.success) {
-        setCourses(res.data.data);
+        let list = res.data.data || [];
+        if (user?.role !== 'super_admin' && (user?.assignedCollegeIds?.length > 0 || user?.assignedCourses?.length > 0)) {
+          const allowedCourses = (user.assignedCourses || []).map(c => c.trim().toLowerCase());
+          const allowedCollegeIds = (user.assignedCollegeIds || []).map(Number);
+          list = list.filter(c => {
+            const cColId = c.college?.id != null ? Number(c.college.id) : (c.college != null ? Number(c.college) : null);
+            const matchesCollege = !allowedCollegeIds.length || (cColId && allowedCollegeIds.includes(cColId));
+            const matchesCourse = !allowedCourses.length || allowedCourses.includes((c.name || '').trim().toLowerCase());
+            return matchesCollege && matchesCourse;
+          });
+        }
+        setCourses(list);
       }
     } catch (err) {
       console.error('Error fetching courses:', err);
@@ -244,7 +255,12 @@ const StudentRegistrationSQL = () => {
     try {
       const res = await api.get('/api/admin/sql/colleges');
       if (res.data.success) {
-        setColleges(res.data.data || []);
+        let cols = res.data.data || [];
+        if (user?.role !== 'super_admin' && user?.assignedCollegeIds?.length > 0) {
+          const allowedCollegeIds = user.assignedCollegeIds.map(Number);
+          cols = cols.filter(c => allowedCollegeIds.includes(Number(c.id)));
+        }
+        setColleges(cols);
       }
     } catch (err) {
       console.error('Error fetching colleges:', err);

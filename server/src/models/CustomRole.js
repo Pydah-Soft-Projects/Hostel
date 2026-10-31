@@ -53,6 +53,30 @@ const customRoleSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
+  assignedBranches: [{
+    type: String,
+    trim: true
+  }],
+  assignedCollegeIds: [{
+    type: Number,
+    required: false
+  }],
+  assignedCollegeScopes: [{
+    collegeId: { type: Number, required: true },
+    levels: [{
+      type: String,
+      enum: ['diploma', 'ug', 'pg'],
+      trim: true
+    }],
+    courses: [{
+      type: String,
+      trim: true
+    }],
+    branches: [{
+      type: String,
+      trim: true
+    }]
+  }],
   isActive: {
     type: Boolean,
     default: true

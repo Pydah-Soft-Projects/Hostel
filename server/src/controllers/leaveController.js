@@ -894,7 +894,7 @@ export const getAllLeaveRequests = async (req, res, next) => {
     // Auto-delete expired leaves before fetching
     await autoDeleteExpiredLeaves();
     
-    const { status, applicationType, page = 1, limit = 10 } = req.query;
+    const { status, applicationType, fromDate, toDate, page = 1, limit = 50 } = req.query;
     const query = {};
 
     if (status) {
@@ -913,9 +913,49 @@ export const getAllLeaveRequests = async (req, res, next) => {
       query.status = { $ne: 'Pending Principal Approval' };
     }
 
+    // Date filtering (strictly checks leave startDate, permissionDate, stayDate, or createdAt)
+    if (fromDate || toDate) {
+      const start = fromDate ? getISTStartOfDay(fromDate) : null;
+      const end = toDate ? getISTEndOfDay(toDate) : null;
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          {
+            applicationType: 'Leave',
+            startDate: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          },
+          {
+            applicationType: 'Permission',
+            permissionDate: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          },
+          {
+            applicationType: 'Stay in Hostel',
+            stayDate: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          },
+          {
+            applicationType: { $nin: ['Leave', 'Permission', 'Stay in Hostel'] },
+            createdAt: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          }
+        ]
+      });
+    }
+
     // Filter by admin's course permissions if they have leave_management permission
     if (req.admin.role === 'sub_admin' && req.admin.permissions && req.admin.permissions.includes('leave_management')) {
-      const { assignedCourses, assignedCollegeId, assignedLevels } = req.admin;
+      const { assignedCourses, assignedCollegeId, assignedCollegeIds, assignedLevels } = req.admin;
       const orConditions = [];
 
       // 1. Legacy/Direct Course Assignment
@@ -957,7 +997,8 @@ export const getAllLeaveRequests = async (req, res, next) => {
       }
 
       if (orConditions.length > 0) {
-         query.$or = orConditions;
+        query.$and = query.$and || [];
+        query.$and.push({ $or: orConditions });
       } else {
          // Admin has leave_management but NO assignments (neither legacy nor new)
          console.log('Admin has leave_management permission but no courses/levels assigned');
@@ -1049,42 +1090,36 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
     const approvedStatuses = ['Approved', 'Principal Approved'];
     const rejectedStatuses = ['Rejected', 'Principal Rejected'];
 
-    const [createdCounts, processedCounts] = await Promise.all([
-      Leave.aggregate([
-        { $match: { ...baseMatch, createdAt: { $gte: start, $lte: end } } },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
-              applicationType: '$applicationType'
-            },
-            requests: { $sum: 1 },
-            pending: { $sum: { $cond: [{ $in: ['$status', pendingStatuses] }, 1, 0] } }
-          }
-        }
-      ]),
-      Leave.aggregate([
-        { $match: { ...baseMatch, status: { $in: [...approvedStatuses, ...rejectedStatuses] } } },
-        {
-          $addFields: {
-            approvalProcessedAt: {
-              $ifNull: ['$approvedAt', { $ifNull: ['$decidedAt', '$updatedAt'] }]
+    const counts = await Leave.aggregate([
+      { $match: baseMatch },
+      {
+        $addFields: {
+          appliedDate: {
+            $switch: {
+              branches: [
+                { case: { $eq: ['$applicationType', 'Leave'] }, then: { $ifNull: ['$startDate', '$createdAt'] } },
+                { case: { $eq: ['$applicationType', 'Permission'] }, then: { $ifNull: ['$permissionDate', '$createdAt'] } },
+                { case: { $eq: ['$applicationType', 'Stay in Hostel'] }, then: { $ifNull: ['$stayDate', '$createdAt'] } }
+              ],
+              default: { $ifNull: ['$startDate', { $ifNull: ['$permissionDate', { $ifNull: ['$stayDate', '$createdAt'] }] }] }
             }
           }
-        },
-        { $match: { approvalProcessedAt: { $gte: start, $lte: end } } },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: '%Y-%m-%d', date: '$approvalProcessedAt', timezone: 'Asia/Kolkata' } },
-              applicationType: '$applicationType'
-            },
-            processed: { $sum: 1 },
-            approved: { $sum: { $cond: [{ $in: ['$status', approvedStatuses] }, 1, 0] } },
-            rejected: { $sum: { $cond: [{ $in: ['$status', rejectedStatuses] }, 1, 0] } }
-          }
         }
-      ])
+      },
+      { $match: { appliedDate: { $gte: start, $lte: end } } },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$appliedDate', timezone: 'Asia/Kolkata' } },
+            applicationType: '$applicationType'
+          },
+          requests: { $sum: 1 },
+          pending: { $sum: { $cond: [{ $in: ['$status', pendingStatuses] }, 1, 0] } },
+          approved: { $sum: { $cond: [{ $in: ['$status', approvedStatuses] }, 1, 0] } },
+          rejected: { $sum: { $cond: [{ $in: ['$status', rejectedStatuses] }, 1, 0] } },
+          processed: { $sum: { $cond: [{ $in: ['$status', [...approvedStatuses, ...rejectedStatuses]] }, 1, 0] } }
+        }
+      }
     ]);
 
     const typeNames = ['Leave', 'Permission', 'Stay in Hostel'];
@@ -1120,7 +1155,7 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
       return byDate.get(date);
     };
 
-    createdCounts.forEach(item => {
+    counts.forEach(item => {
       const type = item._id.applicationType;
       const day = getDay(item._id.date);
       const dayType = day.byType.get(type);
@@ -1129,16 +1164,6 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
         if (!target) return;
         target.requests += item.requests || 0;
         target.pending += item.pending || 0;
-      });
-    });
-
-    processedCounts.forEach(item => {
-      const type = item._id.applicationType;
-      const day = getDay(item._id.date);
-      const dayType = day.byType.get(type);
-      const totalType = byTypeMap.get(type);
-      [day, dayType, totalType].forEach(target => {
-        if (!target) return;
         target.processed += item.processed || 0;
         target.approved += item.approved || 0;
         target.rejected += item.rejected || 0;

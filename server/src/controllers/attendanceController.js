@@ -164,6 +164,26 @@ export const getStudentsForAttendance = async (req, res, next) => {
     console.log('🔍 getStudentsForAttendance - Query params:', { date, course, branch, gender, category, roomNumber, academicYear, hostel });
     console.log('🔍 getStudentsForAttendance - Normalized date:', normalizedDate);
 
+    const adminUser = req.admin || req.user;
+    const academicFilters = { course, branch };
+    if (adminUser) {
+      const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
+
+    const hasAcademicFilter = !!(
+      academicFilters.course ||
+      academicFilters.branch ||
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0) ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0)
+    );
+
     let students;
     if (academicYear) {
       const result = await fetchStudentsForAcademicYear({
@@ -172,9 +192,9 @@ export const getStudentsForAttendance = async (req, res, next) => {
         filters: { gender, category, roomNumber, hostelStatus: 'Active', hostel },
         page: 1,
         limit: 1000000,
-        academicFilters: { course, branch },
+        academicFilters,
         skipFeesAndConcessions: true,
-        skipEnrichment: true
+        skipEnrichment: !hasAcademicFilter
       });
       students = result.students;
 
@@ -191,6 +211,13 @@ export const getStudentsForAttendance = async (req, res, next) => {
     } else {
       const query = buildActiveStudentsQuery({ gender, category, roomNumber, hostel });
 
+      if (academicFilters.allowedCourses?.length > 0 && !course) {
+        query.course = { $in: academicFilters.allowedCourses };
+      }
+      if (academicFilters.allowedBranches?.length > 0 && !branch) {
+        query.branch = { $in: academicFilters.allowedBranches };
+      }
+
       console.log('🔍 getStudentsForAttendance - Query:', query);
 
       students = await User.find(query)
@@ -198,8 +225,13 @@ export const getStudentsForAttendance = async (req, res, next) => {
         .sort({ name: 1 })
         .lean();
 
-      students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true, skipEnrichment: true });
-      students = await filterStudentsByCourseBranch(students, course, branch);
+      if (hasAcademicFilter) {
+        students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true });
+        students = students.filter(s => matchesAcademicFilters(s, academicFilters));
+      } else {
+        students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true, skipEnrichment: true });
+        students = await filterStudentsByCourseBranch(students, course, branch);
+      }
     }
 
     // Attendance opens strictly from effective joining date (joiningDate -> admitDate -> createdAt)
@@ -530,6 +562,26 @@ export const getAttendanceForDate = async (req, res, next) => {
     const { gender, hostel } = resolveWardenStudentScope(req.admin, queryGender, queryHostel);
     const normalizedDate = normalizeToISTStartOfDay(date || new Date());
 
+    const adminUser = req.admin || req.user;
+    const academicFilters = { course, branch };
+    if (adminUser) {
+      const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
+
+    const hasAcademicFilter = !!(
+      academicFilters.course ||
+      academicFilters.branch ||
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0) ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0)
+    );
+
     let students;
     if (academicYear) {
       const result = await fetchStudentsForAcademicYear({
@@ -543,9 +595,9 @@ export const getAttendanceForDate = async (req, res, next) => {
         },
         page: 1,
         limit: 1000000,
-        academicFilters: { course, branch },
+        academicFilters,
         skipFeesAndConcessions: true,
-        skipEnrichment: true
+        skipEnrichment: !hasAcademicFilter
       });
       students = result.students;
 
@@ -567,13 +619,25 @@ export const getAttendanceForDate = async (req, res, next) => {
         hostel
       });
 
+      if (academicFilters.allowedCourses?.length > 0 && !course) {
+        studentQuery.course = { $in: academicFilters.allowedCourses };
+      }
+      if (academicFilters.allowedBranches?.length > 0 && !branch) {
+        studentQuery.branch = { $in: academicFilters.allowedBranches };
+      }
+
       students = await User.find(studentQuery)
         .select('name rollNumber admissionNumber course branch year gender roomNumber category hostel admitDate joiningDate leftDate createdAt')
         .sort({ name: 1 })
         .lean();
 
-      students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true });
-      students = await filterStudentsByCourseBranch(students, course, branch);
+      if (hasAcademicFilter) {
+        students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true });
+        students = students.filter(s => matchesAcademicFilters(s, academicFilters));
+      } else {
+        students = await enrichStudentsAcademics(students, { skipFeesAndConcessions: true });
+        students = await filterStudentsByCourseBranch(students, course, branch);
+      }
     }
 
     // Attendance opens strictly from effective joining date (joiningDate -> admitDate -> createdAt)
@@ -978,16 +1042,66 @@ export const getAttendanceStats = async (req, res, next) => {
     const { date } = req.query;
     const normalizedDate = normalizeToISTStartOfDay(date || new Date());
 
-    const stats = await Attendance.getAttendanceStats(normalizedDate);
-    const statistics = stats[0] || {
-      totalStudents: 0,
-      morningPresent: 0,
-      eveningPresent: 0,
-      nightPresent: 0,
-      fullyPresent: 0,
-      partiallyPresent: 0,
-      absent: 0
-    };
+    const adminUser = req.admin || req.user;
+    let scopedStudentIds = null;
+    if (adminUser) {
+      const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        const query = { role: 'student', applicationStatus: { $in: ['Active', 'Extended'] } };
+        if (scope.allowedCourses?.length > 0) query.course = { $in: scope.allowedCourses };
+        if (scope.allowedBranches?.length > 0) query.branch = { $in: scope.allowedBranches };
+        const users = await User.find(query).select('_id').lean();
+        scopedStudentIds = users.map(u => u._id);
+      }
+    }
+
+    let statistics;
+    if (scopedStudentIds !== null) {
+      const totalStudents = scopedStudentIds.length;
+      const attendances = await Attendance.find({
+        date: normalizedDate,
+        student: { $in: scopedStudentIds }
+      }).lean();
+
+      let morningPresent = 0, eveningPresent = 0, nightPresent = 0;
+      let fullyPresent = 0, partiallyPresent = 0;
+
+      for (const att of attendances) {
+        const m = att.morning ? 1 : 0;
+        const e = att.evening ? 1 : 0;
+        const n = att.night ? 1 : 0;
+        const count = m + e + n;
+        if (m) morningPresent++;
+        if (e) eveningPresent++;
+        if (n) nightPresent++;
+        if (count === 3) fullyPresent++;
+        else if (count > 0) partiallyPresent++;
+      }
+      const present = fullyPresent + partiallyPresent;
+      const absent = Math.max(0, totalStudents - present);
+
+      statistics = {
+        totalStudents,
+        morningPresent,
+        eveningPresent,
+        nightPresent,
+        fullyPresent,
+        partiallyPresent,
+        absent
+      };
+    } else {
+      const stats = await Attendance.getAttendanceStats(normalizedDate);
+      statistics = stats[0] || {
+        totalStudents: 0,
+        morningPresent: 0,
+        eveningPresent: 0,
+        nightPresent: 0,
+        fullyPresent: 0,
+        partiallyPresent: 0,
+        absent: 0
+      };
+    }
 
     // Calculate percentages
     const totalStudents = statistics.totalStudents;

@@ -462,18 +462,43 @@ const Students = () => {
 
   // Derived dropdown options
   const courseOptions = useMemo(() => {
-    const names = courses.map(c => c.name).filter(Boolean);
+    let list = courses;
+    if (user?.role !== 'super_admin' && (user?.assignedCollegeIds?.length > 0 || user?.assignedCourses?.length > 0)) {
+      const allowedCourses = (user.assignedCourses || []).map(c => c.trim().toLowerCase());
+      const allowedCollegeIds = (user.assignedCollegeIds || []).map(Number);
+      list = list.filter(c => {
+        const cColId = c.college?.id != null ? Number(c.college.id) : (c.college != null ? Number(c.college) : null);
+        const matchesCollege = !allowedCollegeIds.length || (cColId && allowedCollegeIds.includes(cColId));
+        const matchesCourse = !allowedCourses.length || allowedCourses.includes((c.name || '').trim().toLowerCase());
+        return matchesCollege && matchesCourse;
+      });
+    }
+    const names = list.map(c => c.name).filter(Boolean);
     return Array.from(new Set(names)).sort();
-  }, [courses]);
+  }, [courses, user]);
 
   const branchOptions = useMemo(() => {
+    let list = allBranches;
+    if (user?.role !== 'super_admin' && (user?.assignedCollegeIds?.length > 0 || user?.assignedCourses?.length > 0 || user?.assignedBranches?.length > 0)) {
+      const allowedBranches = (user.assignedBranches || []).map(b => b.trim().toLowerCase());
+      const allowedCourses = (user.assignedCourses || []).map(c => c.trim().toLowerCase());
+      const allowedCollegeIds = (user.assignedCollegeIds || []).map(Number);
+      list = list.filter(b => {
+        const bColId = b.college?.id != null ? Number(b.college.id) : (b.college != null ? Number(b.college) : null);
+        const matchesCollege = !allowedCollegeIds.length || (bColId && allowedCollegeIds.includes(bColId));
+        const bCourseName = (b.course?.name || b.courseName || b.course || '').trim().toLowerCase();
+        const matchesCourse = !allowedCourses.length || allowedCourses.includes(bCourseName);
+        const matchesBranch = !allowedBranches.length || allowedBranches.includes((b.name || '').trim().toLowerCase());
+        return matchesCollege && matchesCourse && matchesBranch;
+      });
+    }
     const targetCourse = filters.course;
     const filtered = targetCourse
-      ? allBranches.filter(branch => normalizeText(branch.course?.name || branch.courseName || branch.course) === normalizeText(targetCourse))
-      : allBranches;
+      ? list.filter(branch => normalizeText(branch.course?.name || branch.courseName || branch.course) === normalizeText(targetCourse))
+      : list;
     const names = filtered.map(b => b.name).filter(Boolean);
     return Array.from(new Set(names)).sort();
-  }, [allBranches, filters.course]);
+  }, [allBranches, filters.course, user]);
 
 
   // Debounce search term
@@ -547,7 +572,18 @@ const Students = () => {
     try {
       const res = await api.get('/api/course-management/courses');
       if (res.data.success) {
-        setCourses(res.data.data);
+        let list = res.data.data || [];
+        if (user?.role !== 'super_admin' && (user?.assignedCollegeIds?.length > 0 || user?.assignedCourses?.length > 0)) {
+          const allowedCourses = (user.assignedCourses || []).map(c => c.trim().toLowerCase());
+          const allowedCollegeIds = (user.assignedCollegeIds || []).map(Number);
+          list = list.filter(c => {
+            const cColId = c.college?.id != null ? Number(c.college.id) : (c.college != null ? Number(c.college) : null);
+            const matchesCollege = !allowedCollegeIds.length || (cColId && allowedCollegeIds.includes(cColId));
+            const matchesCourse = !allowedCourses.length || allowedCourses.includes((c.name || '').trim().toLowerCase());
+            return matchesCollege && matchesCourse;
+          });
+        }
+        setCourses(list);
       } else {
         console.error('âŒ Failed to fetch courses:', res.data.message);
         toast.error('Failed to fetch courses');
@@ -568,7 +604,20 @@ const Students = () => {
       // Fetch all branches from SQL-backed endpoint
       const res = await api.get('/api/course-management/branches');
       if (res.data.success) {
-        const all = res.data.data || [];
+        let all = res.data.data || [];
+        if (user?.role !== 'super_admin' && (user?.assignedCollegeIds?.length > 0 || user?.assignedCourses?.length > 0 || user?.assignedBranches?.length > 0)) {
+          const allowedBranches = (user.assignedBranches || []).map(b => b.trim().toLowerCase());
+          const allowedCourses = (user.assignedCourses || []).map(c => c.trim().toLowerCase());
+          const allowedCollegeIds = (user.assignedCollegeIds || []).map(Number);
+          all = all.filter(b => {
+            const bColId = b.college?.id != null ? Number(b.college.id) : (b.college != null ? Number(b.college) : null);
+            const matchesCollege = !allowedCollegeIds.length || (bColId && allowedCollegeIds.includes(bColId));
+            const bCourseName = (b.course?.name || b.courseName || b.course || '').trim().toLowerCase();
+            const matchesCourse = !allowedCourses.length || allowedCourses.includes(bCourseName);
+            const matchesBranch = !allowedBranches.length || allowedBranches.includes((b.name || '').trim().toLowerCase());
+            return matchesCollege && matchesCourse && matchesBranch;
+          });
+        }
         setAllBranches(all);
 
         const courseName = getCourseName(courseIdOrName) || courseIdOrName;
@@ -1126,7 +1175,7 @@ const Students = () => {
     fetchCourses();
     fetchBranches();
     fetchHostels(); // Fetch hostels on mount
-  }, []);
+  }, [user]);
 
   // Check for prefilled data from preregistration and URL parameters
   useEffect(() => {

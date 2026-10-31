@@ -335,6 +335,8 @@ const DashboardHome = () => {
       byCourse: []
     },
     attendance: {
+      byCourseToday: {},
+      byCourseYesterday: {},
       today: {
         total: 0,
         present: 0,
@@ -532,7 +534,19 @@ const DashboardHome = () => {
     };
 
     fetchDashboardData();
-  }, [analyticsMode, selectedAcademicYear, canViewRooms, canViewAttendance]);
+  }, [analyticsMode, selectedAcademicYear, canViewRooms, canViewAttendance, user]);
+
+  // Scoped courses for non-super-admin users
+  const displayCourses = useMemo(() => {
+    let list = stats.students.byCourse || [];
+    if (user?.role !== 'super_admin' && (user?.assignedCourses?.length > 0 || user?.assignedCollegeIds?.length > 0)) {
+      if (user?.assignedCourses?.length > 0) {
+        const allowedLower = user.assignedCourses.map(c => c.trim().toLowerCase());
+        list = list.filter(c => allowedLower.includes((c.name || '').trim().toLowerCase()));
+      }
+    }
+    return list;
+  }, [stats.students.byCourse, user]);
 
   // Calculate trends
   const financialTrend = useMemo(() => {
@@ -566,9 +580,9 @@ const DashboardHome = () => {
         id: 'attendance',
         icon: CheckCircleIcon,
         label: "Today's Attendance",
-        value: `${stats.attendance.today.percentage}%`,
+        value: `${stats?.attendance?.today?.percentage ?? 0}%`,
         color: 'border-green-500 text-green-600',
-        extra: `${stats.attendance.today.present} present`,
+        extra: `${stats?.attendance?.today?.present ?? 0} present`,
         onClick: () => navigate('/admin/dashboard/attendance'),
         animateDelay: 0.1
       });
@@ -847,11 +861,11 @@ const DashboardHome = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100 bg-white">
-                                {stats.students.byCourse.length > 0 ? stats.students.byCourse.map(course => (
+                                {displayCourses.length > 0 ? displayCourses.map(course => (
                                   (() => {
                                     const courseKey = normalizeText(course.name);
-                                    const todayAttendance = stats.attendance.byCourseToday[courseKey];
-                                    const yesterdayAttendance = stats.attendance.byCourseYesterday[courseKey];
+                                    const todayAttendance = stats?.attendance?.byCourseToday?.[courseKey] || stats?.attendance?.today?.byCourseToday?.[courseKey];
+                                    const yesterdayAttendance = stats?.attendance?.byCourseYesterday?.[courseKey] || stats?.attendance?.today?.byCourseYesterday?.[courseKey];
                                     const renderAttendance = attendanceSummary => attendanceSummary ? (
                                       <div>
                                         <div className="text-sm font-semibold text-gray-900">
@@ -886,12 +900,12 @@ const DashboardHome = () => {
                         <div className="rounded-lg border border-green-100 bg-green-50 p-3">
                           <div className="flex items-baseline justify-between gap-3">
                             <span className="text-sm font-medium text-green-900">Today's Attendance</span>
-                            <span className="text-lg font-bold text-green-800">{stats.attendance.today.percentage}%</span>
+                            <span className="text-lg font-bold text-green-800">{stats?.attendance?.today?.percentage ?? 0}%</span>
                           </div>
                           <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs text-gray-600">
-                            <span>{stats.attendance.today.fullyPresent} present</span>
-                            <span>{stats.attendance.today.partiallyPresent} partial</span>
-                            <span>{stats.attendance.today.absent} absent</span>
+                            <span>{stats?.attendance?.today?.fullyPresent ?? 0} present</span>
+                            <span>{stats?.attendance?.today?.partiallyPresent ?? 0} partial</span>
+                            <span>{stats?.attendance?.today?.absent ?? 0} absent</span>
                           </div>
                         </div>
                       )}
