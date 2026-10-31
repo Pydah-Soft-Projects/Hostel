@@ -1,4 +1,4 @@
-import { getCoursesFromSQL } from './courseBranchMapper.js';
+import { getCoursesFromSQL, getBranchesFromSQL } from './courseBranchMapper.js';
 import { fetchCourseByIdFromSQL, fetchBranchByIdFromSQL } from './sqlService.js';
 
 /**
@@ -62,59 +62,164 @@ export const resolveBranchName = async (branchValue) => {
 };
 
 /**
- * Get allowed course names for an admin based on their assignments
+ * Comprehensive resolution of an admin/user's college, course, and branch scope.
+ * Returns { isScoped: boolean, allowedCollegeIds: number[], allowedCourses: string[], allowedBranches: string[] }
  */
-export const getAllowedCourseNames = async (admin) => {
-  const { assignedCourses, assignedCollegeIds, assignedCollegeId, assignedLevels, assignedCollegeScopes, course } = admin;
-  const allowedCourseNames = new Set();
-  const hasExplicitCollegeScopes = assignedCollegeScopes?.length > 0;
-
-  // 1. Legacy/Direct singular course (for principals)
-  if (course && !hasExplicitCollegeScopes) {
-    allowedCourseNames.add(course.trim());
+export const getAdminScopedAcademics = async (admin) => {
+  if (!admin || admin.role === 'super_admin') {
+    return {
+      isScoped: false,
+      allowedCollegeIds: [],
+      allowedCourses: [],
+      allowedBranches: []
+    };
   }
 
-  // 2. Legacy/Direct Course Assignment (for sub_admins)
-  if (!hasExplicitCollegeScopes && assignedCourses && assignedCourses.length > 0) {
-    assignedCourses.forEach(c => {
-      if (c) allowedCourseNames.add(c.trim());
-    });
-  }
-
-  // 3. College & Level Based Assignment
-  const colleges = (assignedCollegeIds && assignedCollegeIds.length > 0) 
-    ? assignedCollegeIds 
-    : (assignedCollegeId ? [assignedCollegeId] : []);
-  
-  const collegeScopes = assignedCollegeScopes?.length
-    ? assignedCollegeScopes.map(scope => ({
-      collegeId: Number(scope.collegeId),
-      levels: (scope.levels || []).map(level => level.toLowerCase().trim())
-    }))
-    : colleges.map(collegeId => ({
-      collegeId: Number(collegeId),
-      levels: (assignedLevels || []).map(level => level.toLowerCase().trim())
-    }));
-
-  if (collegeScopes.length > 0) {
-    try {
-      const allSQLCourses = await getCoursesFromSQL();
-
-      const matchedCourses = allSQLCourses.filter(course => {
-        const scope = collegeScopes.find(item => item.collegeId === Number(course.college?.id));
-        if (!scope) return false;
-        return scope.levels.length === 0 || (course.level && scope.levels.includes(course.level.toLowerCase().trim()));
-      });
-      
-      matchedCourses.forEach(c => {
-        if (c.name) allowedCourseNames.add(c.name.trim());
-      });
-      
-    //   console.log(`🔍 [adminUtils] Resolved ${matchedCourses.length} courses for Colleges [${colleges}] and Levels [${assignedLevels}]`);
-    } catch (err) {
-      console.error("Error resolving courses for college/level:", err);
+  let customRole = null;
+  if (admin.customRoleId) {
+    if (admin.customRoleId.assignedCollegeIds || admin.customRoleId.assignedCourses) {
+      customRole = admin.customRoleId;
+    } else {
+      try {
+        const CustomRole = (await import('../models/CustomRole.js')).default;
+        customRole = await CustomRole.findById(admin.customRoleId).lean();
+      } catch (e) {
+        console.error('Error fetching customRole for scope:', e);
+      }
     }
   }
 
-  return Array.from(allowedCourseNames);
+  const collegeIds = (admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0)
+    ? admin.assignedCollegeIds.map(Number)
+    : (admin.assignedCollegeId ? [Number(admin.assignedCollegeId)] : ((customRole?.assignedCollegeIds?.length > 0) ? customRole.assignedCollegeIds.map(Number) : []));
+
+  const scopes = (admin.assignedCollegeScopes && admin.assignedCollegeScopes.length > 0)
+    ? admin.assignedCollegeScopes
+    : (customRole?.assignedCollegeScopes || []);
+  const assignedCourses = ((admin.assignedCourses && admin.assignedCourses.length > 0)
+    ? admin.assignedCourses
+    : (customRole?.assignedCourses || [])).filter(Boolean);
+  const assignedBranches = ((admin.assignedBranches && admin.assignedBranches.length > 0)
+    ? admin.assignedBranches
+    : (customRole?.assignedBranches || [])).filter(Boolean);
+
+  const hasScope = collegeIds.length > 0 || scopes.length > 0 || assignedCourses.length > 0 || assignedBranches.length > 0 || admin.course;
+  if (!hasScope) {
+    return {
+      isScoped: false,
+      allowedCollegeIds: [],
+      allowedCourses: [],
+      allowedBranches: []
+    };
+  }
+
+  const allSQLCourses = await getCoursesFromSQL();
+  const allSQLBranches = await getBranchesFromSQL();
+
+  const allowedCoursesSet = new Set();
+  const allowedBranchesSet = new Set();
+
+  if (scopes.length > 0) {
+    for (const scope of scopes) {
+      const cId = Number(scope.collegeId);
+      const collegeCourses = allSQLCourses.filter(c => Number(c.college?.id) === cId);
+      
+      const targetCourses = (scope.courses && scope.courses.length > 0)
+        ? collegeCourses.filter(c => scope.courses.some(sc => normalizeCourseName(sc) === normalizeCourseName(c.name)))
+        : (assignedCourses.length > 0 ? collegeCourses.filter(c => assignedCourses.some(ac => normalizeCourseName(ac) === normalizeCourseName(c.name))) : collegeCourses);
+
+      targetCourses.forEach(c => {
+        if (c.name) allowedCoursesSet.add(c.name.trim());
+      });
+
+      const targetCourseNames = targetCourses.map(c => normalizeCourseName(c.name));
+      const collegeBranches = allSQLBranches.filter(b => {
+        const bColId = Number(b.college?.id);
+        const bCourseNorm = normalizeCourseName(b.courseName || b.course?.name);
+        return (bColId === cId || targetCourseNames.includes(bCourseNorm)) && targetCourseNames.includes(bCourseNorm);
+      });
+
+      const targetBranches = (scope.branches && scope.branches.length > 0)
+        ? collegeBranches.filter(b => scope.branches.some(sb => sb.trim().toUpperCase() === b.name.trim().toUpperCase()))
+        : (assignedBranches.length > 0 ? collegeBranches.filter(b => assignedBranches.some(ab => ab.trim().toUpperCase() === b.name.trim().toUpperCase())) : collegeBranches);
+
+      targetBranches.forEach(b => {
+        if (b.name) allowedBranchesSet.add(b.name.trim());
+      });
+    }
+  } else if (collegeIds.length > 0) {
+    const rawCollegeCourses = allSQLCourses.filter(c => collegeIds.includes(Number(c.college?.id)));
+    const collegeCourses = assignedCourses.length > 0
+      ? rawCollegeCourses.filter(c => assignedCourses.some(ac => normalizeCourseName(ac) === normalizeCourseName(c.name)))
+      : rawCollegeCourses;
+
+    collegeCourses.forEach(c => {
+      if (c.name) allowedCoursesSet.add(c.name.trim());
+    });
+
+    const targetCourseNames = collegeCourses.map(c => normalizeCourseName(c.name));
+    const rawCollegeBranches = allSQLBranches.filter(b => {
+      const bColId = Number(b.college?.id);
+      const bCourseNorm = normalizeCourseName(b.courseName || b.course?.name);
+      return (collegeIds.includes(bColId) || targetCourseNames.includes(bCourseNorm)) && targetCourseNames.includes(bCourseNorm);
+    });
+    const collegeBranches = assignedBranches.length > 0
+      ? rawCollegeBranches.filter(b => assignedBranches.some(ab => ab.trim().toUpperCase() === b.name.trim().toUpperCase()))
+      : rawCollegeBranches;
+
+    collegeBranches.forEach(b => {
+      if (b.name) allowedBranchesSet.add(b.name.trim());
+    });
+  }
+
+  // Top level overrides if specified
+  if (assignedCourses.length > 0 && allowedCoursesSet.size === 0) {
+    assignedCourses.forEach(c => allowedCoursesSet.add(c.trim()));
+  }
+  if (admin.course && typeof admin.course === 'string') {
+    allowedCoursesSet.add(admin.course.trim());
+  }
+
+  if (assignedBranches.length > 0 && allowedBranchesSet.size === 0) {
+    assignedBranches.forEach(b => allowedBranchesSet.add(b.trim()));
+  }
+  if (admin.branch && typeof admin.branch === 'string') {
+    allowedBranchesSet.add(admin.branch.trim());
+  }
+
+  let allowedCourses = Array.from(allowedCoursesSet);
+  if (assignedCourses.length > 0) {
+    const assignedNorm = assignedCourses.map(normalizeCourseName);
+    allowedCourses = allowedCourses.filter(c => assignedNorm.includes(normalizeCourseName(c)));
+    if (allowedCourses.length === 0) {
+      allowedCourses = [...assignedCourses];
+    }
+  }
+
+  let allowedBranches = Array.from(allowedBranchesSet);
+  if (assignedBranches.length > 0) {
+    const assignedBNorm = assignedBranches.map(b => b.trim().toUpperCase());
+    allowedBranches = allowedBranches.filter(b => assignedBNorm.includes(b.trim().toUpperCase()));
+    if (allowedBranches.length === 0) {
+      allowedBranches = [...assignedBranches];
+    }
+  }
+
+  return {
+    isScoped: true,
+    allowedCollegeIds: collegeIds,
+    allowedCourses,
+    allowedBranches
+  };
+};
+
+/**
+ * Get allowed course names for an admin based on their assignments
+ */
+export const getAllowedCourseNames = async (admin) => {
+  const scoped = await getAdminScopedAcademics(admin);
+  if (scoped.isScoped) {
+    return scoped.allowedCourses;
+  }
+  return [];
 };

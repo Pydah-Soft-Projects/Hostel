@@ -205,9 +205,18 @@ export const getColleges = async (req, res, next) => {
     const result = await fetchCollegesFromSQL();
     
     if (result.success) {
+      let data = result.data || [];
+      const adminUser = req.admin || req.user;
+      if (adminUser && adminUser.role !== 'super_admin') {
+        const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+        const scope = await getAdminScopedAcademics(adminUser);
+        if (scope.isScoped && scope.allowedCollegeIds?.length > 0) {
+          data = data.filter(c => scope.allowedCollegeIds.includes(Number(c.id)));
+        }
+      }
       res.json({
         success: true,
-        data: result.data
+        data
       });
     } else {
       res.status(500).json({

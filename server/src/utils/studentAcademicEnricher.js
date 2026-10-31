@@ -610,12 +610,31 @@ export const enrichStudentsAcademics = async (students, options = {}) => {
 };
 
 export const matchesAcademicFilters = (student, filters = {}) => {
-  const { course, branch, year } = filters;
-  const norm = (v) => (v || '').toString().trim().toUpperCase();
+  const { course, branch, year, allowedCourses, allowedBranches, allowedCollegeIds } = filters;
+  const norm = (v) => (v || '').toString().trim().toUpperCase().replace(/\./g, '').replace(/\s+/g, '');
 
   if (course?.trim() && norm(student.course) !== norm(course)) return false;
   if (branch?.trim() && norm(student.branch) !== norm(branch)) return false;
   if (year != null && year !== '' && Number(student.year) !== Number(year)) return false;
+
+  if (allowedCourses && Array.isArray(allowedCourses) && allowedCourses.length > 0) {
+    const sCourse = norm(student.course);
+    if (!sCourse || !allowedCourses.map(norm).includes(sCourse)) return false;
+  }
+
+  if (allowedBranches && Array.isArray(allowedBranches) && allowedBranches.length > 0) {
+    const sBranch = norm(student.branch);
+    if (!sBranch || !allowedBranches.map(norm).includes(sBranch)) return false;
+  }
+
+  if (allowedCollegeIds && Array.isArray(allowedCollegeIds) && allowedCollegeIds.length > 0) {
+    const allowedIds = allowedCollegeIds.map(Number);
+    const sColId = student.college?.id != null
+      ? Number(student.college.id)
+      : (typeof student.college === 'number' ? Number(student.college) : null);
+    if (!sColId || !allowedIds.includes(sColId)) return false;
+  }
+
   return true;
 };
 

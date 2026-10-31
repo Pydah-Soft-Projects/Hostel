@@ -18,7 +18,7 @@ import Counter from '../models/Counter.js';
 import axios from 'axios';
 import { fetchStudentByIdentifier, testSQLConnection } from '../utils/sqlService.js';
 import { normalizeBatchToYear, getBatchEndYear, validateAcademicYearForBatch } from '../utils/batchUtils.js';
-import { getAllowedCourseNames } from '../utils/adminUtils.js';
+import { getAllowedCourseNames, getAdminScopedAcademics } from '../utils/adminUtils.js';
 import {
   enrichStudentAcademics,
   enrichStudentsAcademics,
@@ -1140,7 +1140,32 @@ export const getStudents = async (req, res, next) => {
   try {
     let { page = 1, limit = 10, course, branch, gender, category, roomNumber, batch, academicYear, year, search, hostelStatus, hostel, skipFeesAndConcessions } = req.query;
     const academicFilters = { course, branch, year: year ? parseInt(year, 10) : undefined };
-    const hasAcademicFilter = !!(course || branch || year);
+
+    // Resolve user/admin scope (Colleges, Courses, Branches)
+    const adminUser = req.admin || req.user;
+    if (adminUser) {
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) {
+          academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        }
+        if (scope.allowedCourses?.length > 0) {
+          academicFilters.allowedCourses = scope.allowedCourses;
+        }
+        if (scope.allowedBranches?.length > 0) {
+          academicFilters.allowedBranches = scope.allowedBranches;
+        }
+      }
+    }
+
+    const hasAcademicFilter = !!(
+      academicFilters.course ||
+      academicFilters.branch ||
+      academicFilters.year ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0) ||
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0)
+    );
 
     // Wardens are always scoped to their assigned hostel (legacy: hostelType → gender)
     const warden = req.warden || (req.admin?.role === 'warden' ? req.admin : null);
@@ -1180,6 +1205,13 @@ export const getStudents = async (req, res, next) => {
       if (roomNumber) query.roomNumber = roomNumber;
       if (batch) query.batch = batch;
       if (hostel) query.hostel = hostel;
+
+      if (academicFilters.allowedCourses?.length > 0 && !course) {
+        query.course = { $in: academicFilters.allowedCourses };
+      }
+      if (academicFilters.allowedBranches?.length > 0 && !branch) {
+        query.branch = { $in: academicFilters.allowedBranches };
+      }
 
       if (hostelStatus) {
         const statusNorm = String(hostelStatus).toLowerCase();
@@ -2117,15 +2149,34 @@ export const getTempStudentsSummary = async (req, res) => {
 export const getStudentsCount = async (req, res, next) => {
   try {
     const { course, branch, gender, academicYear, hostelStatus } = req.query;
+    const academicFilters = { course, branch };
+
+    const adminUser = req.admin || req.user;
+    if (adminUser) {
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
     
+    const hasAcademicFilter = !!(
+      academicFilters.course ||
+      academicFilters.branch ||
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0) ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0)
+    );
+
     if (academicYear) {
       const result = await fetchStudentsForAcademicYear({
         academicYear,
         filters: { gender, hostelStatus },
         page: 1,
         limit: 1000000,
-        academicFilters: { course, branch },
-        skipEnrichment: true,
+        academicFilters,
+        skipEnrichment: !hasAcademicFilter,
         skipFeesAndConcessions: true
       });
       
@@ -2160,7 +2211,11 @@ export const getStudentsCount = async (req, res, next) => {
     }
 
     if (course) query.course = course;
+    else if (academicFilters.allowedCourses?.length > 0) query.course = { $in: academicFilters.allowedCourses };
+
     if (branch) query.branch = branch;
+    else if (academicFilters.allowedBranches?.length > 0) query.branch = { $in: academicFilters.allowedBranches };
+
     if (gender) query.gender = gender;
 
     const totalStudents = await User.countDocuments(query);
@@ -2185,6 +2240,10 @@ export const getStudentsCount = async (req, res, next) => {
       newStudentsQuery.applicationStatus = { $in: ['Active', 'Extended'] };
     }
     if (gender) newStudentsQuery.gender = gender;
+    if (course) newStudentsQuery.course = course;
+    else if (academicFilters.allowedCourses?.length > 0) newStudentsQuery.course = { $in: academicFilters.allowedCourses };
+    if (branch) newStudentsQuery.branch = branch;
+    else if (academicFilters.allowedBranches?.length > 0) newStudentsQuery.branch = { $in: academicFilters.allowedBranches };
     
     const newThisWeek = await User.countDocuments(newStudentsQuery);
     
@@ -2207,8 +2266,27 @@ export const getStudentsCount = async (req, res, next) => {
 export const getCourseCounts = async (req, res, next) => {
   try {
     const { course, branch, category, roomNumber, academicYear, hostelStatus, hostel } = req.query;
+    const academicFilters = { course, branch };
+
+    const adminUser = req.admin || req.user;
+    if (adminUser) {
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
 
     let enriched = [];
+
+    const hasAcademicFilter = !!(
+      academicFilters.course ||
+      academicFilters.branch ||
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0) ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0)
+    );
 
     if (academicYear) {
       const result = await fetchStudentsForAcademicYear({
@@ -2216,8 +2294,8 @@ export const getCourseCounts = async (req, res, next) => {
         filters: { category, roomNumber, hostelStatus, hostel },
         page: 1,
         limit: 100000,
-        academicFilters: { course, branch },
-        skipEnrichment: true,
+        academicFilters,
+        skipEnrichment: !hasAcademicFilter,
         skipFeesAndConcessions: true
       });
       enriched = result.students;
@@ -2225,7 +2303,10 @@ export const getCourseCounts = async (req, res, next) => {
       const query = { role: 'student' };
 
       if (course) query.course = course;
+      else if (academicFilters.allowedCourses?.length > 0) query.course = { $in: academicFilters.allowedCourses };
+
       if (branch) query.branch = branch;
+      else if (academicFilters.allowedBranches?.length > 0) query.branch = { $in: academicFilters.allowedBranches };
       if (category) query.category = category;
       if (roomNumber) query.roomNumber = roomNumber;
       if (hostelStatus) {
@@ -2267,12 +2348,30 @@ const DASHBOARD_CACHE_TTL = 15 * 1000;
 export const getDashboardSummary = async (req, res, next) => {
   try {
     const { academicYear } = req.query;
-    const cacheKey = academicYear ? `ay_${academicYear}` : 'live';
+    const adminUser = req.admin || req.user;
+    const adminId = (adminUser?._id || 'anon').toString();
+    const cacheKey = academicYear ? `ay_${academicYear}_${adminId}` : `live_${adminId}`;
     const cached = dashboardSummaryCache.get(cacheKey);
 
     if (cached && (Date.now() - cached.ts < DASHBOARD_CACHE_TTL)) {
       return res.status(200).json(cached.response);
     }
+
+    const academicFilters = {};
+    if (adminUser) {
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
+
+    const hasAcademicFilter = !!(
+      (academicFilters.allowedCollegeIds && academicFilters.allowedCollegeIds.length > 0) ||
+      (academicFilters.allowedCourses && academicFilters.allowedCourses.length > 0) ||
+      (academicFilters.allowedBranches && academicFilters.allowedBranches.length > 0)
+    );
 
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
@@ -2282,6 +2381,7 @@ export const getDashboardSummary = async (req, res, next) => {
     let totalStudentsCount = 0;
     let newThisWeekCount = 0;
     let byCourse = [];
+    let scopedStudentIds = null;
 
     if (academicYear) {
       const [activeAyResult, allAyResult] = await Promise.all([
@@ -2290,14 +2390,16 @@ export const getDashboardSummary = async (req, res, next) => {
           filters: { hostelStatus: 'active' },
           page: 1,
           limit: 100000,
-          skipEnrichment: true,
+          academicFilters,
+          skipEnrichment: !hasAcademicFilter,
           skipFeesAndConcessions: true
         }),
         fetchStudentsForAcademicYear({
           academicYear,
           page: 1,
           limit: 100000,
-          skipEnrichment: true,
+          academicFilters,
+          skipEnrichment: !hasAcademicFilter,
           skipFeesAndConcessions: true
         })
       ]);
@@ -2310,6 +2412,10 @@ export const getDashboardSummary = async (req, res, next) => {
       inactiveStudentsCount = Math.max(0, totalStudentsCount - activeStudentsCount);
       newThisWeekCount = allList.filter(s => new Date(s.createdAt) >= oneWeekAgo).length;
 
+      if (hasAcademicFilter) {
+        scopedStudentIds = allList.map(s => s._id).filter(Boolean);
+      }
+
       const countsMap = {};
       allList.forEach(s => {
         const cName = (typeof s.course === 'string' ? s.course : s.course?.name) || 'Unassigned';
@@ -2321,26 +2427,68 @@ export const getDashboardSummary = async (req, res, next) => {
         .sort((a, b) => b.count - a.count);
     } else {
       const activeFilter = { role: 'student', applicationStatus: { $in: ['Active', 'Extended'] } };
-      const [activeCount, totalCount, newCount, studentsByCourseRaw] = await Promise.all([
-        User.countDocuments(activeFilter),
-        User.countDocuments({ role: 'student' }),
-        User.countDocuments({ ...activeFilter, createdAt: { $gte: oneWeekAgo } }),
-        User.aggregate([
-          { $match: activeFilter },
-          { $group: { _id: '$course', count: { $sum: 1 } } }
-        ])
-      ]);
+      const allFilter = { role: 'student' };
 
-      activeStudentsCount = activeCount;
-      totalStudentsCount = totalCount;
-      inactiveStudentsCount = Math.max(0, totalCount - activeCount);
-      newThisWeekCount = newCount;
-      byCourse = studentsByCourseRaw
-        .map(item => ({
-          name: item._id || 'Unassigned',
-          count: item.count
-        }))
-        .sort((a, b) => b.count - a.count);
+      if (academicFilters.allowedCourses?.length > 0) {
+        activeFilter.course = { $in: academicFilters.allowedCourses };
+        allFilter.course = { $in: academicFilters.allowedCourses };
+      }
+      if (academicFilters.allowedBranches?.length > 0) {
+        activeFilter.branch = { $in: academicFilters.allowedBranches };
+        allFilter.branch = { $in: academicFilters.allowedBranches };
+      }
+
+      if (hasAcademicFilter) {
+        const allDocs = await User.find(allFilter).select('-password').lean();
+        let enriched = await enrichStudentsAcademics(allDocs, { skipFeesAndConcessions: true });
+        enriched = enriched.filter(s => matchesAcademicFilters(s, academicFilters));
+        enriched = dedupeStudentsByIdentity(enriched);
+
+        totalStudentsCount = enriched.length;
+        const activeDocs = enriched.filter(s => ['Active', 'Extended'].includes(s.applicationStatus));
+        activeStudentsCount = activeDocs.length;
+        inactiveStudentsCount = Math.max(0, totalStudentsCount - activeStudentsCount);
+        newThisWeekCount = enriched.filter(s => new Date(s.createdAt) >= oneWeekAgo).length;
+        scopedStudentIds = enriched.map(s => s._id).filter(Boolean);
+
+        const countsMap = {};
+        enriched.forEach(s => {
+          const cName = (typeof s.course === 'string' ? s.course : s.course?.name) || 'Unassigned';
+          countsMap[cName] = (countsMap[cName] || 0) + 1;
+        });
+
+        byCourse = Object.entries(countsMap)
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count);
+      } else {
+        const [activeCount, totalCount, newCount, studentsByCourseRaw] = await Promise.all([
+          User.countDocuments(activeFilter),
+          User.countDocuments(allFilter),
+          User.countDocuments({ ...activeFilter, createdAt: { $gte: oneWeekAgo } }),
+          User.aggregate([
+            { $match: activeFilter },
+            { $group: { _id: '$course', count: { $sum: 1 } } }
+          ])
+        ]);
+
+        activeStudentsCount = activeCount;
+        totalStudentsCount = totalCount;
+        inactiveStudentsCount = Math.max(0, totalCount - activeCount);
+        newThisWeekCount = newCount;
+        byCourse = studentsByCourseRaw
+          .map(item => ({
+            name: item._id || 'Unassigned',
+            count: item.count
+          }))
+          .sort((a, b) => b.count - a.count);
+      }
+    }
+
+    const complaintMatch = {};
+    const leaveMatch = {};
+    if (scopedStudentIds !== null) {
+      complaintMatch.student = { $in: scopedStudentIds };
+      leaveMatch.student = { $in: scopedStudentIds };
     }
 
     const [
@@ -2351,9 +2499,11 @@ export const getDashboardSummary = async (req, res, next) => {
       ayActiveOccupied
     ] = await Promise.all([
       Complaint.aggregate([
+        ...(Object.keys(complaintMatch).length ? [{ $match: complaintMatch }] : []),
         { $group: { _id: '$currentStatus', count: { $sum: 1 } } }
       ]),
       Leave.aggregate([
+        ...(Object.keys(leaveMatch).length ? [{ $match: leaveMatch }] : []),
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       Room.aggregate([

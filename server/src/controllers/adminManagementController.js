@@ -125,7 +125,11 @@ export const createSubAdmin = async (req, res, next) => {
       hrmsUserId,
       hrmsEmployeeRef,
       hrmsLinkType,
-      name
+      name,
+      assignedCollegeIds,
+      assignedCollegeScopes,
+      assignedCourses,
+      assignedBranches
     } = req.body;
 
     // If custom role is assigned, validate it exists and get its permissions
@@ -157,6 +161,18 @@ export const createSubAdmin = async (req, res, next) => {
       if (customRole.courseAssignment === 'selected') {
         roleLeaveManagementCourses = customRole.assignedCourses;
       }
+      if ((!assignedCollegeIds || assignedCollegeIds.length === 0) && customRole.assignedCollegeIds?.length > 0) {
+        assignedCollegeIds = customRole.assignedCollegeIds;
+      }
+      if ((!assignedCollegeScopes || assignedCollegeScopes.length === 0) && customRole.assignedCollegeScopes?.length > 0) {
+        assignedCollegeScopes = customRole.assignedCollegeScopes;
+      }
+      if ((!assignedCourses || assignedCourses.length === 0) && customRole.assignedCourses?.length > 0) {
+        assignedCourses = customRole.assignedCourses;
+      }
+      if ((!assignedBranches || assignedBranches.length === 0) && customRole.assignedBranches?.length > 0) {
+        assignedBranches = customRole.assignedBranches;
+      }
       // If courseAssignment is 'all', leaveManagementCourses will be handled dynamically
     }
 
@@ -185,6 +201,10 @@ export const createSubAdmin = async (req, res, next) => {
       permissions: rolePermissions,
       permissionAccessLevels: roleAccessLevels || {},
       leaveManagementCourses: roleLeaveManagementCourses || [],
+      assignedCollegeIds: Array.isArray(assignedCollegeIds) ? assignedCollegeIds.map(Number) : [],
+      assignedCollegeScopes: Array.isArray(assignedCollegeScopes) ? assignedCollegeScopes : [],
+      assignedCourses: Array.isArray(assignedCourses) ? assignedCourses : [],
+      assignedBranches: Array.isArray(assignedBranches) ? assignedBranches : [],
       createdBy: req.admin._id
     };
 
@@ -359,11 +379,11 @@ export const getWardens = async (req, res, next) => {
 export const updateSubAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { username, password, permissions, isActive, leaveManagementCourses, permissionAccessLevels, customRoleId, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name, email } = req.body;
+    const { username, password, permissions, isActive, leaveManagementCourses, permissionAccessLevels, customRoleId, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name, email, assignedCollegeIds, assignedCollegeScopes, assignedCourses, assignedBranches } = req.body;
     let resolvedLeaveManagementCourses = leaveManagementCourses;
 
     console.log('📝 Updating admin:', id);
-    console.log('📝 Update data:', { username, permissions, isActive, leaveManagementCourses, customRoleId });
+    console.log('📝 Update data:', { username, permissions, isActive, leaveManagementCourses, customRoleId, assignedCollegeIds });
 
     // Build query based on admin role
     let query = {
@@ -410,6 +430,18 @@ export const updateSubAdmin = async (req, res, next) => {
           admin.leaveManagementCourses = customRole.assignedCourses;
         } else {
           admin.leaveManagementCourses = [];
+        }
+        if ((!assignedCollegeIds || assignedCollegeIds.length === 0) && customRole.assignedCollegeIds?.length > 0) {
+          admin.assignedCollegeIds = customRole.assignedCollegeIds;
+        }
+        if ((!assignedCollegeScopes || assignedCollegeScopes.length === 0) && customRole.assignedCollegeScopes?.length > 0) {
+          admin.assignedCollegeScopes = customRole.assignedCollegeScopes;
+        }
+        if ((!assignedCourses || assignedCourses.length === 0) && customRole.assignedCourses?.length > 0) {
+          admin.assignedCourses = customRole.assignedCourses;
+        }
+        if ((!assignedBranches || assignedBranches.length === 0) && customRole.assignedBranches?.length > 0) {
+          admin.assignedBranches = customRole.assignedBranches;
         }
       } else {
         // Reverting to sub-admin
@@ -461,6 +493,18 @@ export const updateSubAdmin = async (req, res, next) => {
     if (permissionAccessLevels !== undefined && !customRoleId) {
       console.log('📝 Updating permission access levels from:', admin.permissionAccessLevels, 'to:', permissionAccessLevels);
       admin.permissionAccessLevels = permissionAccessLevels;
+    }
+    if (assignedCollegeIds !== undefined) {
+      admin.assignedCollegeIds = Array.isArray(assignedCollegeIds) ? assignedCollegeIds.map(Number) : [];
+    }
+    if (assignedCollegeScopes !== undefined) {
+      admin.assignedCollegeScopes = Array.isArray(assignedCollegeScopes) ? assignedCollegeScopes : [];
+    }
+    if (assignedCourses !== undefined) {
+      admin.assignedCourses = Array.isArray(assignedCourses) ? assignedCourses : [];
+    }
+    if (assignedBranches !== undefined) {
+      admin.assignedBranches = Array.isArray(assignedBranches) ? assignedBranches : [];
     }
     if (typeof isActive === 'boolean') {
       admin.isActive = isActive;
@@ -732,8 +776,8 @@ export const adminLogin = async (req, res, next) => {
       tokenData.customRole = admin.customRole;
     }
 
-    // NEW LOGIC: Inject assignedCourses AND CollegeDetails for Principals based on assignedCollegeIds
-    if (admin.role === 'principal' && admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0) {
+    // Inject assignedCourses AND CollegeDetails for Principals & Users based on assignedCollegeIds
+    if (['principal', 'sub_admin', 'custom'].includes(admin.role) && admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0) {
       try {
         const { fetchCoursesFromSQL, fetchCollegesFromSQL } = await import('../utils/sqlService.js');
         
@@ -753,24 +797,25 @@ export const adminLogin = async (req, res, next) => {
            console.log(`🎓 [Login] Injected ${admin.assignedCollegeDetails.length} college details`);
         }
 
-        // 2. Fetch and inject Assigned Courses (existing logic)
-        const sqlCoursesResult = await fetchCoursesFromSQL();
+        // 2. Fetch and inject Assigned Courses and Branches
+        const { getAdminScopedAcademics } = await import('../utils/adminUtils.js');
+        const scope = await getAdminScopedAcademics(admin);
         
-        if (sqlCoursesResult.success) {
-           const allCourses = sqlCoursesResult.data;
-           
-           // Filter courses that match College IDs AND Levels
-           const derivedCourses = await getAllowedCourseNames(admin);
-           console.log(`🎓 [Login] Derived ${derivedCourses.length} courses from colleges for principal`);
-           
-           // Override/Inject assignedCourses in the token data and admin object for response
-           // We do NOT save this to DB, just use it for the session
-           admin.assignedCourses = derivedCourses; 
-           tokenData.assignedCourses = derivedCourses;
-           if (derivedCourses.length > 0) {
-             tokenData.course = derivedCourses[0];
-             admin.course = derivedCourses[0];
-           }
+        const finalCourses = (admin.assignedCourses && admin.assignedCourses.length > 0)
+          ? admin.assignedCourses
+          : (scope.allowedCourses || []);
+        const finalBranches = (admin.assignedBranches && admin.assignedBranches.length > 0)
+          ? admin.assignedBranches
+          : (scope.allowedBranches || []);
+          
+        admin.assignedCourses = finalCourses;
+        admin.assignedBranches = finalBranches;
+        tokenData.assignedCourses = finalCourses;
+        tokenData.assignedBranches = finalBranches;
+        
+        if (finalCourses.length > 0 && !admin.course) {
+          tokenData.course = finalCourses[0];
+          admin.course = finalCourses[0];
         }
       } catch (err) {
         console.error('🎓 [Login] Error generating courses/colleges from SQL:', err);
@@ -787,7 +832,12 @@ export const adminLogin = async (req, res, next) => {
       employeeId: admin.employeeId || undefined,
       role: admin.role,
       permissions: admin.permissions,
-      permissionAccessLevels: admin.permissionAccessLevels
+      permissionAccessLevels: admin.permissionAccessLevels,
+      assignedCollegeIds: admin.assignedCollegeIds || [],
+      assignedCollegeScopes: admin.assignedCollegeScopes || [],
+      assignedCourses: admin.assignedCourses || [],
+      assignedBranches: admin.assignedBranches || [],
+      assignedCollegeDetails: admin.assignedCollegeDetails || []
     };
 
     // Include hostel assignment for wardens

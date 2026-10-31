@@ -11,7 +11,10 @@ export const createCustomRole = async (req, res, next) => {
       permissions, 
       permissionAccessLevels,
       courseAssignment,
-      assignedCourses
+      assignedCourses,
+      assignedBranches,
+      assignedCollegeIds,
+      assignedCollegeScopes
     } = req.body;
 
     console.log('🔧 Creating custom role:', name);
@@ -27,24 +30,15 @@ export const createCustomRole = async (req, res, next) => {
       throw createError(400, 'At least one permission must be selected');
     }
 
-    // Validate course assignment
-    if (courseAssignment === 'selected' && (!assignedCourses || assignedCourses.length === 0)) {
-      throw createError(400, 'At least one course must be selected when using selected course assignment');
-    }
-
-    // Validate that all assigned courses exist in SQL database and convert to course names
-    let validatedCourses = assignedCourses || [];
-    if (courseAssignment === 'selected' && assignedCourses && assignedCourses.length > 0) {
-      const { getCoursesFromSQL } = await import('../utils/courseBranchMapper.js');
-      const sqlCourses = await getCoursesFromSQL();
-      validatedCourses = assignedCourses.map(courseIdOrName => {
-        const course = sqlCourses.find(c => c.name === courseIdOrName || c._id === courseIdOrName);
-        if (!course) {
-          throw createError(400, `Invalid course selected: ${courseIdOrName}. Course must exist in SQL database.`);
-        }
-        return course.name; // Store course name as string
-      });
-    }
+    const cleanedScopes = (assignedCollegeScopes || []).map(scope => ({
+      collegeId: Number(scope.collegeId),
+      levels: scope.levels || [],
+      courses: (scope.courses || []).filter(c => c && c !== '__NONE__'),
+      branches: (scope.branches || []).filter(b => b && b !== '__NONE__')
+    }));
+    const cleanedCourses = (assignedCourses || []).filter(c => c && c !== '__NONE__');
+    const cleanedBranches = (assignedBranches || []).filter(b => b && b !== '__NONE__');
+    const cleanedCollegeIds = (assignedCollegeIds || []).map(Number).filter(id => !isNaN(id) && id > 0);
 
     // Create new custom role
     const customRole = new CustomRole({
@@ -52,8 +46,11 @@ export const createCustomRole = async (req, res, next) => {
       description,
       permissions,
       permissionAccessLevels: permissionAccessLevels || {},
-      courseAssignment: courseAssignment || 'all',
-      assignedCourses: validatedCourses,
+      courseAssignment: courseAssignment || (cleanedCourses.length > 0 ? 'selected' : 'all'),
+      assignedCourses: cleanedCourses,
+      assignedBranches: cleanedBranches,
+      assignedCollegeIds: cleanedCollegeIds,
+      assignedCollegeScopes: cleanedScopes,
       createdBy: req.admin._id
     });
 
@@ -132,6 +129,9 @@ export const updateCustomRole = async (req, res, next) => {
       permissionAccessLevels,
       courseAssignment,
       assignedCourses,
+      assignedBranches,
+      assignedCollegeIds,
+      assignedCollegeScopes,
       isActive
     } = req.body;
 
@@ -175,25 +175,25 @@ export const updateCustomRole = async (req, res, next) => {
     if (courseAssignment !== undefined) {
       customRole.courseAssignment = courseAssignment;
     }
+    if (assignedCollegeScopes !== undefined) {
+      customRole.assignedCollegeScopes = (assignedCollegeScopes || []).map(scope => ({
+        collegeId: Number(scope.collegeId),
+        levels: scope.levels || [],
+        courses: (scope.courses || []).filter(c => c && c !== '__NONE__'),
+        branches: (scope.branches || []).filter(b => b && b !== '__NONE__')
+      }));
+    }
+    if (assignedCollegeIds !== undefined) {
+      customRole.assignedCollegeIds = (assignedCollegeIds || []).map(Number).filter(cid => !isNaN(cid) && cid > 0);
+    }
     if (assignedCourses !== undefined) {
-      if (courseAssignment === 'selected' && (!assignedCourses || assignedCourses.length === 0)) {
-        throw createError(400, 'At least one course must be selected when using selected course assignment');
+      customRole.assignedCourses = (assignedCourses || []).filter(c => c && c !== '__NONE__');
+      if (customRole.assignedCourses.length > 0 && !customRole.courseAssignment) {
+        customRole.courseAssignment = 'selected';
       }
-      
-      // Validate that all assigned courses exist in SQL database and convert to course names
-      let validatedCourses = assignedCourses;
-      if (courseAssignment === 'selected' && assignedCourses && assignedCourses.length > 0) {
-        const { getCoursesFromSQL } = await import('../utils/courseBranchMapper.js');
-        const sqlCourses = await getCoursesFromSQL();
-        validatedCourses = assignedCourses.map(courseIdOrName => {
-          const course = sqlCourses.find(c => c.name === courseIdOrName || c._id === courseIdOrName);
-          if (!course) {
-            throw createError(400, `Invalid course selected: ${courseIdOrName}. Course must exist in SQL database.`);
-          }
-          return course.name; // Store course name as string
-        });
-      }
-      customRole.assignedCourses = validatedCourses;
+    }
+    if (assignedBranches !== undefined) {
+      customRole.assignedBranches = (assignedBranches || []).filter(b => b && b !== '__NONE__');
     }
     if (typeof isActive === 'boolean') {
       customRole.isActive = isActive;

@@ -2,7 +2,7 @@ import BulkOuting from '../models/BulkOuting.js';
 import Leave from '../models/Leave.js';
 import User from '../models/User.js';
 import { createError } from '../utils/error.js';
-import { normalizeToISTStartOfDay } from '../utils/dateUtils.js';
+import { normalizeToISTStartOfDay, getISTStartOfDay, getISTEndOfDay } from '../utils/dateUtils.js';
 
 // Create bulk outing request (Warden)
 export const createBulkOuting = async (req, res, next) => {
@@ -118,11 +118,35 @@ export const getWardenBulkOutings = async (req, res, next) => {
 // Get all bulk outing requests (Admin)
 export const getAllBulkOutings = async (req, res, next) => {
   try {
-    const { status, page = 1, limit = 10 } = req.query;
+    const { status, fromDate, toDate, page = 1, limit = 50 } = req.query;
     
     const query = {};
     if (status) {
       query.status = status;
+    }
+
+    if (fromDate || toDate) {
+      const start = fromDate ? getISTStartOfDay(fromDate) : null;
+      const end = toDate ? getISTEndOfDay(toDate) : null;
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          {
+            outingDate: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          },
+          {
+            outingDate: { $exists: false },
+            createdAt: {
+              ...(start && { $gte: start }),
+              ...(end && { $lte: end })
+            }
+          }
+        ]
+      });
     }
 
     const bulkOutings = await BulkOuting.find(query)
