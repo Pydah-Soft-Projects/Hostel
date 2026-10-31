@@ -298,12 +298,10 @@ const DashboardHome = () => {
   // Count visible stat cards for dynamic grid
   const visibleStatCards = useMemo(() => {
     let count = 0;
-    if (canViewStudents) count++;
-    if (canViewAttendance) count++;
     if (canViewFinancial) count++;
     if (canViewComplaints) count++;
     return count;
-  }, [canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints]);
+  }, [canViewFinancial, canViewComplaints]);
 
   // Count visible modules in left column
   const visibleLeftModules = useMemo(() => {
@@ -561,32 +559,6 @@ const DashboardHome = () => {
   // Define stat card items with their IDs and configurations
   const statCardItems = useMemo(() => {
     const items = [];
-    if (canViewStudents) {
-      items.push({
-        id: 'students',
-        icon: UserGroupIcon,
-        label: analyticsMode === 'ay' ? 'Overall Students' : 'Active Students',
-        value: analyticsMode === 'ay' ? (stats.students.total || stats.students.active) : stats.students.active,
-        color: 'border-blue-500 text-blue-600',
-        extra: analyticsMode === 'ay'
-          ? `${stats.students.active || 0} active | ${stats.students.inactive || 0} inactive`
-          : `${stats.students.inactive || 0} inactive students`,
-        onClick: () => navigate('/admin/dashboard/students'),
-        animateDelay: 0.05
-      });
-    }
-    if (canViewAttendance) {
-      items.push({
-        id: 'attendance',
-        icon: CheckCircleIcon,
-        label: "Today's Attendance",
-        value: `${stats?.attendance?.today?.percentage ?? 0}%`,
-        color: 'border-green-500 text-green-600',
-        extra: `${stats?.attendance?.today?.present ?? 0} present`,
-        onClick: () => navigate('/admin/dashboard/attendance'),
-        animateDelay: 0.1
-      });
-    }
     if (canViewFinancial) {
       items.push({
         id: 'financial',
@@ -614,7 +586,7 @@ const DashboardHome = () => {
       });
     }
     return items;
-  }, [canViewStudents, canViewAttendance, canViewFinancial, canViewComplaints, stats, financialTrend, navigate, analyticsMode]);
+  }, [canViewFinancial, canViewComplaints, stats, financialTrend, navigate]);
 
   // Get ordered stat cards (apply saved order if available)
   const orderedStatCards = useMemo(() => {
@@ -775,7 +747,7 @@ const DashboardHome = () => {
               strategy={rectSortingStrategy}
             >
               <div
-                className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 lg:gap-4 group"
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-2.5 sm:gap-3 lg:gap-4 group"
               >
                 {orderedStatCards.map((item) => (
                   <DraggableStatCard
@@ -835,22 +807,7 @@ const DashboardHome = () => {
                   >
                     <div className="space-y-4">
                       {canViewStudents && (
-                        <>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="rounded-lg bg-blue-50 p-3 text-center">
-                              <div className="text-lg font-bold text-blue-900">{stats.students.total}</div>
-                              <div className="text-xs text-blue-700">Total</div>
-                            </div>
-                            <div className="rounded-lg bg-green-50 p-3 text-center">
-                              <div className="text-lg font-bold text-green-900">{stats.students.active}</div>
-                              <div className="text-xs text-green-700">Active</div>
-                            </div>
-                            <div className="rounded-lg bg-gray-100 p-3 text-center">
-                              <div className="text-lg font-bold text-gray-900">{stats.students.inactive}</div>
-                              <div className="text-xs text-gray-600">Inactive</div>
-                            </div>
-                          </div>
-                          <div className="overflow-x-auto rounded-lg border border-gray-200">
+                        <div className="overflow-x-auto rounded-lg border border-gray-200">
                             <table className="min-w-full divide-y divide-gray-200 text-left">
                               <thead className="bg-gray-50">
                                 <tr>
@@ -894,7 +851,6 @@ const DashboardHome = () => {
                               </tbody>
                             </table>
                           </div>
-                        </>
                       )}
                       {canViewAttendance && (
                         <div className="rounded-lg border border-green-100 bg-green-50 p-3">
