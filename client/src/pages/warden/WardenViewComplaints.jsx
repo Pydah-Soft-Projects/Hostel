@@ -18,11 +18,22 @@ import {
   EyeIcon
 } from '@heroicons/react/24/outline';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const formatComplaintDate = (value) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = MONTH_NAMES[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day} - ${month} - ${year}`;
+};
+
 const TimelineItem = ({ status, timestamp, note, assignedTo, isLast }) => (
   <div className="group relative py-3 pl-8 sm:pl-32">
     <div className="mb-1 flex flex-col items-start before:absolute before:left-2 before:h-full before:-translate-x-1/2 before:translate-y-3 before:self-start before:bg-slate-300 before:px-px group-last:before:hidden after:absolute after:left-2 after:box-content after:h-2 after:w-2 after:-translate-x-1/2 after:translate-y-1.5 after:rounded-full after:border-4 after:border-slate-50 after:bg-green-600 sm:flex-row sm:before:left-0 sm:before:ml-[6.5rem] sm:after:left-0 sm:after:ml-[6.5rem]">
-      <time className="left-0 mb-3 inline-flex h-6 w-24 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase sm:absolute sm:mb-0">
-        {new Date(timestamp).toLocaleDateString(undefined, { month: 'short', year: 'numeric', day: 'numeric' })}
+      <time className="left-0 mb-3 inline-flex h-6 px-2.5 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase sm:absolute sm:mb-0">
+        {formatComplaintDate(timestamp)}
       </time>
       <div className="text-base sm:text-xl font-bold text-slate-900">{status}</div>
     </div>
@@ -354,7 +365,7 @@ const WardenViewComplaints = () => {
                         <div className="flex items-center gap-1">
                           <span>Raised:</span>
                           <span className="font-medium">
-                            {new Date(complaint.createdAt).toLocaleDateString()}
+                            {formatComplaintDate(complaint.createdAt)}
                           </span>
                         </div>
                         {complaint.raisedBy && (

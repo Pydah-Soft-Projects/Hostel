@@ -915,13 +915,19 @@ export const createPrincipal = async (req, res, next) => {
       }
     }
 
-    // Default principal permissions
-    const principalPermissions = [
-      'principal_attendance_oversight',
-      'principal_student_oversight',
-      'principal_course_management',
-      'leave_management' // Explicitly add leave_management
-    ];
+    // Default or dynamic principal permissions
+    const principalPermissions = (req.body.permissions && Array.isArray(req.body.permissions) && req.body.permissions.length > 0)
+      ? req.body.permissions
+      : [
+          'dashboard_home',
+          'principal_attendance_oversight',
+          'attendance_management',
+          'principal_student_oversight',
+          'student_management',
+          'principal_course_management',
+          'course_management',
+          'leave_management'
+        ];
 
     // Create new principal
     const principalData = {
@@ -995,7 +1001,7 @@ export const getPrincipals = async (req, res, next) => {
 export const updatePrincipal = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { username, password, assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, isActive, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name } = req.body;
+    const { username, password, assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, isActive, email, employeeId, hrmsUserId, hrmsEmployeeRef, hrmsLinkType, name, permissions } = req.body;
 
     console.log('🎓 Updating principal:', id);
     console.log('🎓 Update data:', { username, assignedCollegeId, assignedCollegeIds, assignedCollegeScopes, assignedLevels, isActive, email });
@@ -1062,6 +1068,10 @@ export const updatePrincipal = async (req, res, next) => {
     
     if (email !== undefined) {
       principal.email = email;
+    }
+
+    if (permissions !== undefined && Array.isArray(permissions)) {
+      principal.permissions = permissions;
     }
 
     if (employeeId !== undefined || hrmsLinkType !== undefined) {

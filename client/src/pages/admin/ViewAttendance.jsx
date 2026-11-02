@@ -13,7 +13,8 @@ import {
   EyeIcon,
   ChartBarIcon,
   CalendarDaysIcon,
-  DocumentArrowDownIcon
+  DocumentArrowDownIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import api from '../../utils/axios';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -38,13 +39,45 @@ const generateAcademicYears = () => {
   return years;
 };
 
+const formatYearName = (val) => {
+  if (val === null || val === undefined || val === '' || val === 'Unspecified') return 'Unspecified Year';
+  const str = String(val).trim();
+  const num = parseInt(str.replace(/\D/g, ''), 10);
+  if (num === 1 || str.toLowerCase().includes('first') || str === '1st' || str === '1') return 'First Year';
+  if (num === 2 || str.toLowerCase().includes('second') || str === '2nd' || str === '2') return 'Second Year';
+  if (num === 3 || str.toLowerCase().includes('third') || str === '3rd' || str === '3') return 'Third Year';
+  if (num === 4 || str.toLowerCase().includes('fourth') || str === '4th' || str === '4') return 'Fourth Year';
+  if (num === 5 || str.toLowerCase().includes('fifth') || str === '5th' || str === '5') return 'Fifth Year';
+  return str.toLowerCase().endsWith('year') ? str : `${val} Year`;
+};
+
+const getYearOrder = (yearStr, rawVal) => {
+  const num = parseInt(String(rawVal || yearStr).replace(/\D/g, ''), 10);
+  if (!isNaN(num) && num > 0) return num;
+  const s = String(yearStr).toLowerCase();
+  if (s.includes('first')) return 1;
+  if (s.includes('second')) return 2;
+  if (s.includes('third')) return 3;
+  if (s.includes('fourth')) return 4;
+  if (s.includes('fifth')) return 5;
+  return 99;
+};
+
 const ViewAttendance = ({ onStatsUpdate }) => {
   const { user } = useAuth();
   const { courses, branches, getBranchesByCourse } = useCoursesBranches();
   const [loading, setLoading] = useState(true);
   const [attendance, setAttendance] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [viewMode, setViewMode] = useState('date'); // 'date' or 'range'
+  const [viewMode, setViewMode] = useState('range'); // 'date' or 'range'
+  const [expandedColleges, setExpandedColleges] = useState({});
+
+  const toggleCollegeExpand = (collegeName) => {
+    setExpandedColleges(prev => ({
+      ...prev,
+      [collegeName]: !prev[collegeName]
+    }));
+  };
   const [summaryGroupBy, setSummaryGroupBy] = useState('college');
   const [dateRange, setDateRange] = useState({
     startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -382,12 +415,37 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         || summary.student.collegeName
         || courseInfo?.college?.name
         || 'Unassigned';
-      const yearName = summary.student.year?.name || summary.student.year || 'Unspecified';
-      const groupName = summaryGroupBy === 'college' ? collegeName : String(yearName);
+      const rawYear = summary.student.year?.name || summary.student.year || 'Unspecified';
 
-      if (!grouped.has(groupName)) {
-        grouped.set(groupName, {
-          name: groupName,
+      if (!grouped.has(collegeName)) {
+        grouped.set(collegeName, {
+          name: collegeName,
+          studentCount: 0,
+          totalDays: 0,
+          eligibleDays: 0,
+          presentDays: 0,
+          partialDays: 0,
+          absentDays: 0,
+          onLeaveDays: 0,
+          yearsMap: new Map()
+        });
+      }
+
+      const collegeGroup = grouped.get(collegeName);
+      collegeGroup.studentCount += 1;
+      collegeGroup.totalDays += summary.totalDays;
+      collegeGroup.eligibleDays += Math.max(summary.totalDays - summary.onLeaveDays, 0);
+      collegeGroup.presentDays += summary.presentDays;
+      collegeGroup.partialDays += summary.partialDays;
+      collegeGroup.absentDays += summary.absentDays;
+      collegeGroup.onLeaveDays += summary.onLeaveDays;
+
+      // Group by year inside this college
+      const formattedYear = formatYearName(rawYear);
+      if (!collegeGroup.yearsMap.has(formattedYear)) {
+        collegeGroup.yearsMap.set(formattedYear, {
+          name: formattedYear,
+          rawYear,
           studentCount: 0,
           totalDays: 0,
           eligibleDays: 0,
@@ -397,26 +455,37 @@ const ViewAttendance = ({ onStatsUpdate }) => {
           onLeaveDays: 0
         });
       }
-
-      const group = grouped.get(groupName);
-      group.studentCount += 1;
-      group.totalDays += summary.totalDays;
-      group.eligibleDays += Math.max(summary.totalDays - summary.onLeaveDays, 0);
-      group.presentDays += summary.presentDays;
-      group.partialDays += summary.partialDays;
-      group.absentDays += summary.absentDays;
-      group.onLeaveDays += summary.onLeaveDays;
+      const yearGroup = collegeGroup.yearsMap.get(formattedYear);
+      yearGroup.studentCount += 1;
+      yearGroup.totalDays += summary.totalDays;
+      yearGroup.eligibleDays += Math.max(summary.totalDays - summary.onLeaveDays, 0);
+      yearGroup.presentDays += summary.presentDays;
+      yearGroup.partialDays += summary.partialDays;
+      yearGroup.absentDays += summary.absentDays;
+      yearGroup.onLeaveDays += summary.onLeaveDays;
     });
 
     return Array.from(grouped.values())
-      .map(group => ({
-        ...group,
-        attendancePercentage: group.eligibleDays > 0
-          ? Math.round(((group.presentDays + group.partialDays * 0.33) / group.eligibleDays) * 100)
-          : 0
-      }))
+      .map(group => {
+        const years = Array.from(group.yearsMap.values())
+          .map(year => ({
+            ...year,
+            attendancePercentage: year.eligibleDays > 0
+              ? Math.round(((year.presentDays + year.partialDays * 0.33) / year.eligibleDays) * 100)
+              : 0
+          }))
+          .sort((a, b) => getYearOrder(a.name, a.rawYear) - getYearOrder(b.name, b.rawYear));
+
+        return {
+          ...group,
+          attendancePercentage: group.eligibleDays > 0
+            ? Math.round(((group.presentDays + group.partialDays * 0.33) / group.eligibleDays) * 100)
+            : 0,
+          years
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [attendance, organizedAttendance, viewMode, summaryGroupBy, courses]);
+  }, [attendance, organizedAttendance, viewMode, courses]);
 
   // Get attendance percentage color
   const getPercentageColor = (percentage) => {
@@ -631,26 +700,20 @@ const ViewAttendance = ({ onStatsUpdate }) => {
 
   return (
     <div className="p-3 sm:p-4 lg:p-6">
-      {/* Stats Display */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
-        <div className="text-left sm:text-right">
-          <p className="text-xs sm:text-sm text-gray-500">Total Records</p>
-          <p className="text-lg sm:text-2xl font-bold text-blue-600">{attendance.length}</p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <button
-            onClick={generateExcel}
-            disabled={generatingExcel || attendance.length === 0}
-            className="flex items-center justify-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors touch-manipulation w-full sm:w-auto"
-          >
-            {generatingExcel ? (
-              <LoadingSpinner size="sm" />
-            ) : (
-              <DocumentArrowDownIcon className="w-4 h-4" />
-            )}
-            {generatingExcel ? 'Generating...' : 'Generate Excel'}
-          </button>
-        </div>
+      {/* Action Controls */}
+      <div className="flex justify-end mb-4 sm:mb-6">
+        <button
+          onClick={generateExcel}
+          disabled={generatingExcel || attendance.length === 0}
+          className="flex items-center justify-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors touch-manipulation w-full sm:w-auto"
+        >
+          {generatingExcel ? (
+            <LoadingSpinner size="sm" />
+          ) : (
+            <DocumentArrowDownIcon className="w-4 h-4" />
+          )}
+          {generatingExcel ? 'Generating...' : 'Generate Excel'}
+        </button>
       </div>
 
       {/* Statistics */}
@@ -722,55 +785,24 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         {showMobileFilters && (
           <div className="mt-2 bg-white rounded-lg shadow-sm border border-gray-100 p-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-              {/* View Mode Toggle */}
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">View Mode</label>
-                <select
-                  value={viewMode}
-                  onChange={(e) => setViewMode(e.target.value)}
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Start Date</label>
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
                   className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                >
-                  <option value="date">Single Date</option>
-                  <option value="range">Date Range</option>
-                </select>
+                />
               </div>
-
-              {/* Date Selector */}
-              {viewMode === 'date' ? (
-                <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                    <CalendarIcon className="w-3 h-3 sm:w-4 sm:h-4 inline mr-1" />
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                  />
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Start Date</label>
-                    <input
-                      type="date"
-                      value={dateRange.startDate}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">End Date</label>
-                    <input
-                      type="date"
-                      value={dateRange.endDate}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                      className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                    />
-                  </div>
-                </>
-              )}
+              <div>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">End Date</label>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                  className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
+                />
+              </div>
             </div>
 
             {/* Additional Filters */}
@@ -935,56 +967,25 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         transition={{ delay: 0.2 }}
         className="hidden lg:block bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6 mb-4 sm:mb-6"
       >
-        <div className={`grid grid-cols-1 sm:grid-cols-2 ${viewMode === 'range' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3 sm:gap-4 mb-3 sm:mb-4`}>
-          {/* View Mode Toggle */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div>
-            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">View Mode</label>
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value)}
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Start Date</label>
+            <input
+              type="date"
+              value={dateRange.startDate}
+              onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
               className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-            >
-              <option value="date">Single Date</option>
-              <option value="range">Date Range</option>
-            </select>
+            />
           </div>
-
-          {/* Date Selector */}
-          {viewMode === 'date' ? (
-            <div>
-              <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                <CalendarIcon className="w-3 h-3 sm:w-4 sm:h-4 inline mr-1" />
-                Date
-              </label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-              />
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">Start Date</label>
-                <input
-                  type="date"
-                  value={dateRange.startDate}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                  className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">End Date</label>
-                <input
-                  type="date"
-                  value={dateRange.endDate}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                  className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                />
-              </div>
-            </>
-          )}
+          <div>
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">End Date</label>
+            <input
+              type="date"
+              value={dateRange.endDate}
+              onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+              className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
+            />
+          </div>
 
           {/* Live / AY Wise */}
           <div className="sm:col-span-2 lg:col-span-1">
@@ -1130,33 +1131,11 @@ const ViewAttendance = ({ onStatsUpdate }) => {
         transition={{ delay: 0.3 }}
         className="bg-white rounded-lg shadow-sm overflow-hidden"
       >
-        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-            Attendance Records ({attendance.length})
-            <span className="ml-2 text-xs sm:text-sm font-normal text-gray-500">
-              {analyticsMode === 'ay' && filters.academicYear
-                ? `(${filters.academicYear})`
-                : '(Live · active)'}
+        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex items-center justify-end">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1" aria-label="Attendance abstract grouping">
+            <span className="px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-white text-blue-700 shadow-sm">
+              College-wise
             </span>
-          </h2>
-          <div className="inline-flex w-full sm:w-auto rounded-lg border border-gray-200 bg-gray-50 p-1" aria-label="Attendance abstract grouping">
-            {[
-              { id: 'college', label: 'College-wise' },
-              { id: 'year', label: 'Year-wise' }
-            ].map(option => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setSummaryGroupBy(option.id)}
-                aria-pressed={summaryGroupBy === option.id}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${summaryGroupBy === option.id
-                  ? 'bg-white text-blue-700 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-                  }`}
-              >
-                {option.label}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -1164,7 +1143,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-1 mb-3">
             <div>
               <h3 className="text-sm font-semibold text-gray-900">
-                {summaryGroupBy === 'college' ? 'College-wise Attendance Abstract' : 'Year-wise Attendance Abstract'}
+                College-wise Attendance Abstract
               </h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 {viewMode === 'date' ? 'Summary for the selected date' : 'Summary across the selected date range'}
@@ -1176,7 +1155,7 @@ const ViewAttendance = ({ onStatsUpdate }) => {
               <table className="min-w-full divide-y divide-gray-200 bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <thead className="bg-gray-100">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">{summaryGroupBy === 'college' ? 'College' : 'Year'}</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500">College</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">Students</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'Present' : 'Present Days'}</th>
                     <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-500">{viewMode === 'date' ? 'Partial' : 'Partial Days'}</th>
@@ -1186,17 +1165,63 @@ const ViewAttendance = ({ onStatsUpdate }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {attendanceSummary.map(group => (
-                    <tr key={group.name} className="hover:bg-gray-50">
-                      <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{group.name}</td>
-                      <td className="px-3 py-2.5 text-sm text-right text-gray-700">{group.studentCount}</td>
-                      <td className="px-3 py-2.5 text-sm text-right text-green-700">{group.presentDays}</td>
-                      <td className="px-3 py-2.5 text-sm text-right text-amber-700">{group.partialDays}</td>
-                      <td className="px-3 py-2.5 text-sm text-right text-red-700">{group.absentDays}</td>
-                      <td className="px-3 py-2.5 text-sm text-right text-blue-700">{group.onLeaveDays}</td>
-                      <td className="px-3 py-2.5 text-sm text-right font-semibold text-gray-900">{group.attendancePercentage}%</td>
-                    </tr>
-                  ))}
+                  {attendanceSummary.map(group => {
+                    const isExpanded = !!expandedColleges[group.name];
+                    const hasYears = group.years && group.years.length > 0;
+
+                    return (
+                      <React.Fragment key={group.name}>
+                        <tr
+                          onClick={() => hasYears && toggleCollegeExpand(group.name)}
+                          className={`transition-colors ${hasYears ? 'cursor-pointer hover:bg-blue-50/50' : 'hover:bg-gray-50'} ${isExpanded ? 'bg-blue-50/30' : ''}`}
+                          title={hasYears ? (isExpanded ? 'Click to collapse years' : 'Click to expand years') : undefined}
+                        >
+                          <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
+                            <div className="flex items-center gap-2">
+                              {hasYears && (
+                                <span className={`p-0.5 rounded text-gray-500 hover:text-blue-600 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-blue-600' : ''}`}>
+                                  <ChevronRightIcon className="w-4 h-4" />
+                                </span>
+                              )}
+                              <span className={isExpanded ? 'font-semibold text-blue-900' : ''}>{group.name}</span>
+                              {hasYears && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 font-normal">
+                                  {group.years.length} {group.years.length === 1 ? 'Year' : 'Years'}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-sm text-right text-gray-700 font-medium">{group.studentCount}</td>
+                          <td className="px-3 py-2.5 text-sm text-right text-green-700">{group.presentDays}</td>
+                          <td className="px-3 py-2.5 text-sm text-right text-amber-700">{group.partialDays}</td>
+                          <td className="px-3 py-2.5 text-sm text-right text-red-700">{group.absentDays}</td>
+                          <td className="px-3 py-2.5 text-sm text-right text-blue-700">{group.onLeaveDays}</td>
+                          <td className="px-3 py-2.5 text-sm text-right font-semibold text-gray-900">{group.attendancePercentage}%</td>
+                        </tr>
+
+                        {/* Expanded Year Rows */}
+                        {isExpanded && group.years.map(year => (
+                          <tr
+                            key={`${group.name}-${year.name}`}
+                            className="bg-gray-50/80 hover:bg-gray-100/70 border-t border-dashed border-gray-200 transition-colors"
+                          >
+                            <td className="pl-9 pr-3 py-2 text-xs font-medium text-gray-700">
+                              <div className="flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                <span>{year.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-xs text-right text-gray-600">{year.studentCount}</td>
+                            <td className="px-3 py-2 text-xs text-right text-green-700">{year.presentDays}</td>
+                            <td className="px-3 py-2 text-xs text-right text-amber-700">{year.partialDays}</td>
+                            <td className="px-3 py-2 text-xs text-right text-red-700">{year.absentDays}</td>
+                            <td className="px-3 py-2 text-xs text-right text-blue-700">{year.onLeaveDays}</td>
+                            <td className="px-3 py-2 text-xs text-right font-semibold text-gray-800">{year.attendancePercentage}%</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

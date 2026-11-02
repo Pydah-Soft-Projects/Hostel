@@ -8,11 +8,22 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import jsPDF from 'jspdf';
 import { UserIcon, CheckCircleIcon, ClockIcon, ExclamationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const formatComplaintDate = (value) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = MONTH_NAMES[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day} - ${month} - ${year}`;
+};
+
 const TimelineItem = ({ status, timestamp, note, assignedTo, isLast }) => (
   <div className="group relative py-2 sm:py-3 pl-6 sm:pl-8 lg:pl-32">
     <div className="mb-1 flex flex-col items-start before:absolute before:left-1.5 sm:before:left-2 before:h-full before:-translate-x-1/2 before:translate-y-2 sm:before:translate-y-3 before:self-start before:bg-slate-300 before:px-px group-last:before:hidden after:absolute after:left-1.5 sm:after:left-2 after:box-content after:h-1.5 sm:after:h-2 after:w-1.5 sm:after:w-2 after:-translate-x-1/2 after:translate-y-1 sm:after:translate-y-1.5 after:rounded-full after:border-2 sm:after:border-4 after:border-slate-50 after:bg-indigo-600 sm:flex-row sm:before:left-0 sm:before:ml-[6.5rem] sm:after:left-0 sm:after:ml-[6.5rem]">
-      <time className="left-0 mb-2 sm:mb-3 inline-flex h-5 sm:h-6 w-20 sm:w-24 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase sm:absolute sm:mb-0">
-        {new Date(timestamp).toLocaleDateString(undefined, { month: 'short', year: 'numeric', day: 'numeric' })}
+      <time className="left-0 mb-2 sm:mb-3 inline-flex h-5 sm:h-6 w-20 sm:px-2.5 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase sm:absolute sm:mb-0">
+        {formatComplaintDate(timestamp)}
       </time>
       <div className="text-sm sm:text-base lg:text-xl font-bold text-slate-900 break-words">{status}</div>
     </div>
@@ -515,7 +526,7 @@ const MyComplaints = () => {
                   <svg className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span className="truncate">{new Date(c.createdAt).toLocaleDateString()}</span>
+                  <span className="truncate">{formatComplaintDate(c.createdAt)}</span>
                 </div>
 
                 {c.assignedTo && (

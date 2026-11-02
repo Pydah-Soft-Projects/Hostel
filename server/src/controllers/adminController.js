@@ -1423,12 +1423,19 @@ export const updateStudent = async (req, res, next) => {
         });
 
         if (!stayDates) {
-          throw createError(
-            404,
-            `No hostel request found for this student in academic year ${targetYear}`
-          );
+          if (joiningDate !== undefined) {
+            student.joiningDate = joiningDate ? new Date(joiningDate) : null;
+          }
+          if (admitDate) {
+            student.admitDate = new Date(admitDate);
+          }
+          await student.save({ validateModifiedOnly: true });
+        } else {
+          if (joiningDate !== undefined) {
+            student.joiningDate = joiningDate ? new Date(joiningDate) : null;
+            await student.save({ validateModifiedOnly: true });
+          }
         }
-        // Stay dates live only on HostelRequest — do not mirror onto User
       }
 
       if (leftDate) {
@@ -2345,6 +2352,80 @@ const dashboardSummaryCache = new Map();
 const DASHBOARD_CACHE_TTL = 15 * 1000;
 
 // Lightweight consolidated endpoint for Admin Dashboard Summary
+// Fetch students admitted in the last N days (default 15) for Dashboard
+export const getRecentAdmissions = async (req, res, next) => {
+  try {
+    const days = parseInt(req.query.days, 10) || 15;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    cutoffDate.setHours(0, 0, 0, 0);
+
+    const adminUser = req.admin || req.user;
+    const academicFilters = {};
+    if (adminUser) {
+      const scope = await getAdminScopedAcademics(adminUser);
+      if (scope.isScoped) {
+        if (scope.allowedCollegeIds?.length > 0) academicFilters.allowedCollegeIds = scope.allowedCollegeIds;
+        if (scope.allowedCourses?.length > 0) academicFilters.allowedCourses = scope.allowedCourses;
+        if (scope.allowedBranches?.length > 0) academicFilters.allowedBranches = scope.allowedBranches;
+      }
+    }
+
+    const query = {
+      role: 'student',
+      $or: [
+        { admitDate: { $gte: cutoffDate } },
+        { createdAt: { $gte: cutoffDate } }
+      ]
+    };
+
+    if (academicFilters.allowedCourses?.length > 0) {
+      query.course = { $in: academicFilters.allowedCourses };
+    }
+    if (academicFilters.allowedBranches?.length > 0) {
+      query.branch = { $in: academicFilters.allowedBranches };
+    }
+
+    const students = await User.find(query)
+      .select('name rollNumber admissionNumber course branch year gender roomNumber bedNumber admitDate joiningDate createdAt applicationStatus hostel')
+      .populate('hostel', '_id name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Enrich with canonical joiningDate from HostelRequest if available
+    const admissionNumbers = students.map(s => (s.admissionNumber || '').trim().toUpperCase()).filter(Boolean);
+    const requests = await HostelRequest.find({
+      admissionNumber: { $in: admissionNumbers }
+    }).select('admissionNumber joiningDate admitDate academicYear status').sort({ createdAt: -1 }).lean();
+
+    const reqMap = new Map();
+    for (const r of requests) {
+      const key = (r.admissionNumber || '').trim().toUpperCase();
+      if (!reqMap.has(key)) {
+        reqMap.set(key, r);
+      }
+    }
+
+    const enrichedStudents = students.map(s => {
+      const key = (s.admissionNumber || '').trim().toUpperCase();
+      const r = reqMap.get(key);
+      return {
+        ...s,
+        admitDate: s.admitDate || r?.admitDate || s.createdAt,
+        joiningDate: r?.joiningDate || s.joiningDate || null
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: enrichedStudents
+    });
+  } catch (error) {
+    console.error('Error in getRecentAdmissions:', error);
+    next(createError(500, 'Failed to fetch recent admissions'));
+  }
+};
+
 export const getDashboardSummary = async (req, res, next) => {
   try {
     const { academicYear } = req.query;

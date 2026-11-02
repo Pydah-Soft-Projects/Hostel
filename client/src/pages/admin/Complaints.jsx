@@ -32,6 +32,17 @@ const getValidNextStatuses = (currentStatus, isReopened = false) => {
   }
 };
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const formatComplaintDate = (value) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = MONTH_NAMES[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day} - ${month} - ${year}`;
+};
+
 const STATUS_COLORS = {
   'Received': 'bg-blue-100 text-blue-800',
   'In Progress': 'bg-purple-100 text-purple-800',
@@ -755,9 +766,14 @@ const Complaints = () => {
                     </div>
                   )}
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-2.5 pt-2 border-t border-gray-100">
-                    <span className={`inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-sm font-semibold w-fit ${STATUS_COLORS[c.currentStatus] || STATUS_COLORS['Received']}`}>
-                      {c.currentStatus || 'Received'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs md:text-sm font-semibold w-fit ${STATUS_COLORS[c.currentStatus] || STATUS_COLORS['Received']}`}>
+                        {c.currentStatus || 'Received'}
+                      </span>
+                      <span className="text-[11px] sm:text-xs text-gray-500 font-medium">
+                        {formatComplaintDate(c.createdAt)}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
                       {c.currentStatus === 'Received' && !isLocked && canDeleteComplaint && (
 
@@ -917,7 +933,7 @@ const Complaints = () => {
                     {c.currentStatus || 'Received'}
                   </span>
                   <span className="text-[10px] text-gray-400">
-                    {new Date(c.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                    {formatComplaintDate(c.createdAt)}
                   </span>
                 </div>
               </div>
@@ -1012,7 +1028,7 @@ const Complaints = () => {
 
           {/* Footer */}
           <div className="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
-            <span className="font-medium">{new Date(complaint.createdAt).toLocaleDateString()}</span>
+            <span className="font-medium">{formatComplaintDate(complaint.createdAt)}</span>
             {isLocked && (
               <span className="text-red-500 font-medium flex items-center gap-1">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1714,13 +1730,20 @@ const Complaints = () => {
                       <ClockIcon className="w-5 h-5 sm:w-5 sm:h-5 text-gray-500 flex-shrink-0" />
                       <span className="text-sm sm:text-base font-semibold text-gray-700">Status Information</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium ${STATUS_COLORS[selected.currentStatus]}`}>
-                        {selected.currentStatus}
-                      </span>
-                      {selected.isReopened && (
-                        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-red-100 text-red-800">
-                          Reopened
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium ${STATUS_COLORS[selected.currentStatus]}`}>
+                          {selected.currentStatus}
+                        </span>
+                        {selected.isReopened && (
+                          <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium bg-red-100 text-red-800">
+                            Reopened
+                          </span>
+                        )}
+                      </div>
+                      {selected.createdAt && (
+                        <span className="text-xs sm:text-sm text-gray-500">
+                          Raised: <span className="font-semibold text-gray-700">{formatComplaintDate(selected.createdAt)}</span>
                         </span>
                       )}
                     </div>
@@ -1804,7 +1827,7 @@ const Complaints = () => {
                               <div className="flex-1 min-w-0 pb-3 border-b border-gray-100 last:border-0">
                                 <div className="mb-2">
                                   <time className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">
-                                    {new Date(t.timestamp).toLocaleDateString(undefined, { month: 'short', year: 'numeric', day: 'numeric' })}
+                                    {formatComplaintDate(t.timestamp)}
                                   </time>
                                 </div>
                                 <div className="text-sm font-bold text-gray-900 break-words mb-2">{t.status}</div>
@@ -1824,8 +1847,8 @@ const Complaints = () => {
                           {/* Desktop Timeline */}
                           <div className="hidden sm:block group relative py-2 lg:py-3 pl-6 lg:pl-8 xl:pl-32">
                             <div className="mb-1 flex flex-col items-start before:absolute before:left-1 lg:before:left-2 before:h-full before:-translate-x-1/2 before:translate-y-3 before:self-start before:bg-slate-300 before:px-px group-last:before:hidden after:absolute after:left-1 lg:after:left-2 after:box-content after:h-2 after:w-2 after:-translate-x-1/2 after:translate-y-1.5 after:rounded-full after:border-4 after:border-slate-50 after:bg-indigo-600 lg:flex-row xl:before:left-0 xl:before:ml-[6.5rem] xl:after:left-0 xl:after:ml-[6.5rem]">
-                              <time className="left-0 mb-2 lg:mb-3 inline-flex h-5 lg:h-6 w-20 lg:w-24 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase xl:absolute xl:mb-0">
-                                {new Date(t.timestamp).toLocaleDateString(undefined, { month: 'short', year: 'numeric', day: 'numeric' })}
+                              <time className="left-0 mb-2 lg:mb-3 inline-flex h-5 lg:h-6 px-2.5 translate-y-0.5 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600 uppercase xl:absolute xl:mb-0">
+                                {formatComplaintDate(t.timestamp)}
                               </time>
                               <div className="text-sm lg:text-base xl:text-xl font-bold text-slate-900 break-words">{t.status}</div>
                             </div>

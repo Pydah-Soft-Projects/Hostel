@@ -28,6 +28,7 @@ import {
   ArrowPathIcon,
   UserGroupIcon,
   UserIcon,
+  UserPlusIcon,
   MegaphoneIcon,
   ChartBarIcon,
   ChartPieIcon,
@@ -249,6 +250,59 @@ const DashboardHome = () => {
   }, []);
 
   const [statCardsOrder, setStatCardsOrder] = useState(getInitialCardOrder);
+
+  // States for Newly Admitted Students (last 15 days)
+  const [newStudents, setNewStudents] = useState([]);
+  const [loadingNewStudents, setLoadingNewStudents] = useState(false);
+  const [joiningDates, setJoiningDates] = useState({});
+  const [savingJoiningDate, setSavingJoiningDate] = useState({});
+
+  const fetchRecentAdmissions = useCallback(async () => {
+    setLoadingNewStudents(true);
+    try {
+      const res = await api.get('/api/admin/students/recent-admissions?days=15');
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        setNewStudents(res.data.data);
+        const initialDates = {};
+        res.data.data.forEach(s => {
+          if (s.joiningDate) {
+            initialDates[s._id] = new Date(s.joiningDate).toISOString().slice(0, 10);
+          }
+        });
+        setJoiningDates(initialDates);
+      }
+    } catch (error) {
+      console.error('Error fetching recent admissions:', error);
+    } finally {
+      setLoadingNewStudents(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRecentAdmissions();
+  }, [fetchRecentAdmissions]);
+
+  const handleSaveJoiningDate = async (studentId) => {
+    const dateVal = joiningDates[studentId];
+    if (!dateVal) {
+      toast.error('Please select a valid joining date');
+      return;
+    }
+
+    setSavingJoiningDate(prev => ({ ...prev, [studentId]: true }));
+    try {
+      await api.put('/api/admin/students/' + studentId, {
+        joiningDate: dateVal
+      });
+      toast.success('Hostel joining date saved successfully');
+      setNewStudents(prev => prev.map(s => s._id === studentId ? { ...s, joiningDate: dateVal } : s));
+    } catch (error) {
+      console.error('Error saving joining date:', error);
+      toast.error(error.response?.data?.message || 'Failed to save hostel joining date');
+    } finally {
+      setSavingJoiningDate(prev => ({ ...prev, [studentId]: false }));
+    }
+  };
 
   // Save order to localStorage whenever it changes
   useEffect(() => {
@@ -556,37 +610,10 @@ const DashboardHome = () => {
     };
   }, [stats.financial.thisMonth, stats.financial.lastMonth]);
 
-  // Define stat card items with their IDs and configurations
+  // Define stat card items with their IDs and configurations - Fee Collection & Active Complaints removed per user request
   const statCardItems = useMemo(() => {
-    const items = [];
-    if (canViewFinancial) {
-      items.push({
-        id: 'financial',
-        icon: CurrencyDollarIcon,
-        label: 'Fee Collection (This Month)',
-        value: `₹${(stats.financial.thisMonth / 1000).toFixed(0)}K`,
-        color: 'border-purple-500 text-purple-600',
-        trend: financialTrend?.direction,
-        trendValue: financialTrend?.value,
-        extra: `₹${(stats.financial.pendingPayments / 1000).toFixed(0)}K pending`,
-        onClick: () => navigate('/admin/dashboard/fee-management'),
-        animateDelay: 0.15
-      });
-    }
-    if (canViewComplaints) {
-      items.push({
-        id: 'complaints',
-        icon: ExclamationCircleIcon,
-        label: 'Active Complaints',
-        value: stats.complaints.active,
-        color: 'border-orange-500 text-orange-600',
-        extra: `${stats.complaints.resolvedThisWeek} resolved this week`,
-        onClick: () => navigate('/admin/dashboard/complaints'),
-        animateDelay: 0.2
-      });
-    }
-    return items;
-  }, [canViewFinancial, canViewComplaints, stats, financialTrend, navigate]);
+    return [];
+  }, []);
 
   // Get ordered stat cards (apply saved order if available)
   const orderedStatCards = useMemo(() => {
@@ -799,6 +826,112 @@ const DashboardHome = () => {
                   ? 'lg:col-span-2'
                   : ''
                 }`}>
+                {/* Newly Admitted Students Card (Last 15 Days) */}
+                <ModuleSection
+                  title="Newly Admitted Students"
+                  icon={UserPlusIcon}
+                  iconColor="bg-emerald-500"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500">
+                        Students admitted in the hostel within the last 15 days
+                      </p>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {newStudents.length} {newStudents.length === 1 ? 'Student' : 'Students'}
+                      </span>
+                    </div>
+
+                    {loadingNewStudents ? (
+                      <div className="flex justify-center py-6">
+                        <LoadingSpinner size="md" />
+                      </div>
+                    ) : newStudents.length === 0 ? (
+                      <div className="text-center py-8 px-4 rounded-lg border border-dashed border-gray-200 bg-gray-50/50">
+                        <UserPlusIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-600">No new students admitted in the last 15 days</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Students admitted recently will appear here</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                        {newStudents.map(student => {
+                          const isSaving = !!savingJoiningDate[student._id];
+                          const currentVal = joiningDates[student._id] || (student.joiningDate ? new Date(student.joiningDate).toISOString().slice(0, 10) : '');
+
+                          return (
+                            <div
+                              key={student._id}
+                              className="p-3 bg-white rounded-xl border border-gray-200 hover:border-emerald-300 hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-3"
+                            >
+                              {/* Left: Student Name & Basic Details */}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                  <h4 className="text-sm font-bold text-gray-900">{student.name}</h4>
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-100">
+                                    {student.rollNumber || student.admissionNumber || 'N/A'}
+                                  </span>
+                                  {student.joiningDate && (
+                                    <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-green-50 text-green-700 border border-green-100">
+                                      Joined
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
+                                  <span>{student.course || 'Course N/A'}</span>
+                                  {student.branch && <span>• {student.branch}</span>}
+                                  {student.year && <span>• Year {student.year}</span>}
+                                  {student.hostel?.name && <span>• {student.hostel.name}</span>}
+                                  {student.roomNumber && <span className="font-medium text-gray-700">• Room {student.roomNumber}</span>}
+                                </div>
+                                <div className="text-[11px] text-gray-400 mt-1">
+                                  Admitted: {new Date(student.admitDate || student.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                </div>
+                              </div>
+
+                              {/* Right / Beside: Entering Hostel Joining Date */}
+                              <div className="flex-shrink-0 flex flex-col sm:flex-row sm:items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-gray-100">
+                                <div>
+                                  <label className="block text-[11px] font-medium text-gray-600 mb-0.5 sm:hidden">
+                                    Hostel Joining Date
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={currentVal}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setJoiningDates(prev => ({ ...prev, [student._id]: val }));
+                                    }}
+                                    className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full sm:w-auto text-gray-700 font-medium bg-gray-50/50 hover:bg-white"
+                                    title="Enter hostel joining date"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveJoiningDate(student._id)}
+                                  disabled={isSaving || !currentVal}
+                                  className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-2xs flex items-center justify-center gap-1.5 whitespace-nowrap"
+                                >
+                                  {isSaving ? (
+                                    <>
+                                      <LoadingSpinner size="xs" />
+                                      <span>Saving...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircleIcon className="w-3.5 h-3.5" />
+                                      <span>Save Joining Date</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </ModuleSection>
+
                 {(canViewStudents || canViewAttendance) && (
                   <ModuleSection
                     title="Students At a Glance"

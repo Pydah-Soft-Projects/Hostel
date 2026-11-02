@@ -22,6 +22,7 @@ import {
   ChevronDownIcon,
   PlusIcon,
   Squares2X2Icon,
+  ListBulletIcon,
   ArrowRightIcon,
   ArrowLeftIcon
 } from '@heroicons/react/24/outline';
@@ -125,6 +126,47 @@ const getPermissionIcon = (permissionId) => {
     </svg>
   );
 };
+
+const PRINCIPAL_PAGE_PERMISSIONS = [
+  {
+    id: 'dashboard_home',
+    label: 'Dashboard Home',
+    description: 'Overview statistics, metric cards, and charts'
+  },
+  {
+    id: 'attendance_management',
+    altId: 'principal_attendance_oversight',
+    label: 'Attendance',
+    description: 'Track and monitor student attendance across departments'
+  },
+  {
+    id: 'student_management',
+    altId: 'principal_student_oversight',
+    label: 'Students',
+    description: 'View student profiles, status, and department details'
+  },
+  {
+    id: 'maintenance_ticket_management',
+    label: 'Complaints',
+    description: 'Review and track hostel issues and student complaints'
+  },
+  {
+    id: 'leave_management',
+    label: 'Leaves & Outings',
+    description: 'Review and approve student gate passes and leave applications'
+  },
+  {
+    id: 'room_management',
+    label: 'Stay in Requests',
+    description: 'Review and approve stay-in-hostel requests'
+  },
+  {
+    id: 'course_management',
+    altId: 'principal_course_management',
+    label: 'Reports & Analytics',
+    description: 'Access student count reports and course statistics'
+  }
+];
 
 const PERMISSIONS = [
   { id: 'dashboard_home', label: 'Dashboard Home' },
@@ -266,6 +308,7 @@ const AccessLevelSelector = ({ permissionId, permissionLabel, accessLevel, onAcc
 const AdminManagement = () => {
   const { user, updateUser } = useAuth();
   const [activeTab, setActiveTab] = useState('sub-admins');
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'cards'
   const [subAdmins, setSubAdmins] = useState([]);
   const [wardens, setWardens] = useState([]);
   const [principals, setPrincipals] = useState([]);
@@ -315,15 +358,8 @@ const AdminManagement = () => {
     name: '',
     description: '',
     permissions: [],
-    permissionAccessLevels: {},
-    courseAssignment: 'all',
-    assignedCourses: [],
-    assignedBranches: [],
-    assignedCollegeIds: [],
-    assignedCollegeScopes: []
+    permissionAccessLevels: {}
   });
-  const [roleModalStep, setRoleModalStep] = useState(1);
-  const [roleCollegeSearchQuery, setRoleCollegeSearchQuery] = useState('');
   const [courses, setCourses] = useState([]);
   const [colleges, setColleges] = useState([]); // New state for colleges
   const [hostels, setHostels] = useState([]);
@@ -602,210 +638,6 @@ const AdminManagement = () => {
         [permission]: accessLevel
       }
     }));
-  };
-
-  // Handle role course assignment - store course names
-  const handleRoleCourseSelection = (courseName, checked) => {
-    console.log('🔧 Role course selection:', { courseName, checked });
-    setRoleFormData(prev => {
-      const newAssignedCourses = checked
-        ? [...prev.assignedCourses, courseName]
-        : prev.assignedCourses.filter(name => name !== courseName);
-
-      console.log('🔧 Updated assigned courses:', newAssignedCourses);
-
-      return {
-        ...prev,
-        assignedCourses: newAssignedCourses
-      };
-    });
-  };
-
-  // Scope handlers for Custom Roles
-  const handleRoleCollegeToggle = (collegeId) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const isSelected = prev.assignedCollegeIds?.includes(cId);
-      const newIds = isSelected
-        ? prev.assignedCollegeIds.filter(id => id !== cId)
-        : [...(prev.assignedCollegeIds || []), cId];
-
-      const newScopes = isSelected
-        ? (prev.assignedCollegeScopes || []).filter(s => Number(s.collegeId) !== cId)
-        : [...(prev.assignedCollegeScopes || []), { collegeId: cId, levels: [], courses: [], branches: [] }];
-
-      return {
-        ...prev,
-        assignedCollegeIds: newIds,
-        assignedCollegeScopes: newScopes
-      };
-    });
-  };
-
-  const handleRoleSelectAllColleges = () => {
-    const allIds = colleges.map(c => Number(c.id));
-    setRoleFormData(prev => ({
-      ...prev,
-      assignedCollegeIds: allIds,
-      assignedCollegeScopes: allIds.map(cId => ({ collegeId: cId, levels: [], courses: [], branches: [] }))
-    }));
-  };
-
-  const handleRoleClearAllColleges = () => {
-    setRoleFormData(prev => ({
-      ...prev,
-      assignedCollegeIds: [],
-      assignedCollegeScopes: []
-    }));
-  };
-
-  const handleRoleToggleCollegeCourse = (collegeId, courseName, allCollegeCourses = []) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-      
-      const isNoneCourses = scope.courses && scope.courses.length === 1 && scope.courses[0] === '__NONE__';
-      const isAllCurrently = !scope.courses || scope.courses.length === 0;
-
-      let updatedCourses;
-      if (isAllCurrently || isNoneCourses) {
-        updatedCourses = [courseName];
-      } else if (scope.courses.includes(courseName)) {
-        updatedCourses = scope.courses.filter(c => c !== courseName);
-      } else {
-        updatedCourses = [...scope.courses, courseName];
-      }
-
-      let updatedBranches = (scope.branches || []).filter(b => b !== '__NONE__');
-      if (updatedBranches.length > 0 && updatedCourses.length > 0) {
-        const validBranchNames = branches
-          .filter(b => {
-            const bColId = Number(b.college?.id);
-            const bCourse = b.courseName || b.course?.name || b.course;
-            return (bColId === cId || !bColId) && updatedCourses.includes(bCourse);
-          })
-          .map(b => b.name);
-        updatedBranches = updatedBranches.filter(bn => validBranchNames.includes(bn));
-      }
-
-      const updatedScope = {
-        ...scope,
-        courses: updatedCourses.length === 0 ? ['__NONE__'] : updatedCourses,
-        branches: updatedBranches
-      };
-
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleRoleSelectAllCollegeCourses = (collegeId, allCourseNames) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-
-      const updatedScope = { ...scope, courses: allCourseNames };
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleRoleClearCollegeCourses = (collegeId) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-
-      const updatedScope = { ...scope, courses: ['__NONE__'], branches: ['__NONE__'] };
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleRoleToggleCollegeBranch = (collegeId, branchName, allCollegeBranches = []) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-
-      const isNoneBranches = scope.branches && scope.branches.length === 1 && scope.branches[0] === '__NONE__';
-      const isAllCurrently = !scope.branches || scope.branches.length === 0;
-
-      let updatedBranches;
-      if (isAllCurrently || isNoneBranches) {
-        updatedBranches = [branchName];
-      } else if (scope.branches.includes(branchName)) {
-        updatedBranches = scope.branches.filter(b => b !== branchName);
-      } else {
-        updatedBranches = [...scope.branches, branchName];
-      }
-
-      const updatedScope = {
-        ...scope,
-        branches: updatedBranches.length === 0 ? ['__NONE__'] : updatedBranches
-      };
-
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleRoleSelectAllCollegeBranches = (collegeId) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-
-      const updatedScope = { ...scope, branches: [] };
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleRoleClearCollegeBranches = (collegeId) => {
-    const cId = Number(collegeId);
-    setRoleFormData(prev => {
-      const currentScopes = prev.assignedCollegeScopes || [];
-      const scopeIndex = currentScopes.findIndex(s => Number(s.collegeId) === cId);
-      const scope = scopeIndex >= 0 ? { ...currentScopes[scopeIndex] } : { collegeId: cId, levels: [], courses: [], branches: [] };
-
-      const updatedScope = { ...scope, branches: ['__NONE__'] };
-      const newScopes = scopeIndex >= 0
-        ? currentScopes.map((s, idx) => idx === scopeIndex ? updatedScope : s)
-        : [...currentScopes, updatedScope];
-      return { ...prev, assignedCollegeScopes: newScopes };
-    });
-  };
-
-  const handleProceedToRolePermissions = () => {
-    if (!roleFormData.name || !roleFormData.name.trim()) {
-      toast.error('Please enter a role name');
-      return;
-    }
-    if (!roleFormData.assignedCollegeIds || roleFormData.assignedCollegeIds.length === 0) {
-      toast.error('Please select at least one college in Card 1');
-      return;
-    }
-    setRoleModalStep(2);
   };
 
   // Handle access level changes for permissions
@@ -1160,6 +992,9 @@ const AdminManagement = () => {
           assignedCollegeScopes: formData.assignedCollegeScopes,
           assignedLevels: [...new Set(formData.assignedCollegeScopes.flatMap(scope => scope.levels))],
           email: formData.principalEmail,
+          permissions: formData.permissions?.length > 0
+            ? formData.permissions
+            : PRINCIPAL_PAGE_PERMISSIONS.flatMap(p => p.altId ? [p.id, p.altId] : [p.id]),
           ...hrmsFields
         };
       }
@@ -1283,6 +1118,7 @@ const AdminManagement = () => {
         updateData.assignedLevels = [...new Set(formData.assignedCollegeScopes.flatMap(scope => scope.levels))];
         // Always include email for principals (can be empty to clear it)
         updateData.email = formData.principalEmail;
+        updateData.permissions = formData.permissions;
       }
 
       updateData.employeeId = formData.employeeId || '';
@@ -1447,7 +1283,9 @@ const AdminManagement = () => {
     setFormData({
       username: admin.username,
       password: '',
-      permissions: admin.permissions || [],
+      permissions: admin.permissions && admin.permissions.length > 0
+        ? admin.permissions
+        : (admin.role === 'principal' ? PRINCIPAL_PAGE_PERMISSIONS.flatMap(p => p.altId ? [p.id, p.altId] : [p.id]) : (admin.permissions || [])),
       permissionAccessLevels: admin.permissionAccessLevels || {},
       hostelType: admin.hostelType || '',
       assignedHostelId: admin.assignedHostelId?._id || admin.assignedHostelId || '',
@@ -1593,6 +1431,51 @@ const AdminManagement = () => {
       newPassword: '',
       confirmPassword: ''
     });
+    setRoleFormData({
+      name: '',
+      description: '',
+      permissions: [],
+      permissionAccessLevels: {}
+    });
+    setShowRoleModal(false);
+    setShowPasswordResetModal(false);
+    setSelectedAdmin(null);
+    setSelectedRole(null);
+    setRoleType('sub_admin');
+    setUserModalStep(1);
+    setFormData({
+      username: '',
+      password: '',
+      permissions: [],
+      permissionAccessLevels: {},
+      hostelType: '',
+      assignedHostelId: '',
+      course: '',
+      branch: '',
+      leaveManagementCourses: [],
+      passwordDeliveryMethod: '',
+      email: '',
+      phoneNumber: '',
+      customRoleId: '',
+      principalEmail: '',
+      principalCourses: [],
+      assignedCollegeIds: [],
+      assignedCollegeScopes: [],
+      assignedLevels: [],
+      employeeId: '',
+      hrmsUserId: '',
+      hrmsEmployeeRef: '',
+      hrmsLinkType: '',
+      name: ''
+    });
+    setSelectedHrmsEmployee(null);
+    setHrmsSearchQuery('');
+    setHrmsSearchResults([]);
+    setUserCollegeSearchQuery('');
+    setPasswordResetData({
+      newPassword: '',
+      confirmPassword: ''
+    });
     setRoleModalStep(1);
     setRoleCollegeSearchQuery('');
     setRoleFormData({
@@ -1616,67 +1499,22 @@ const AdminManagement = () => {
       toast.error('Role name is required');
       return;
     }
-    if (!roleFormData.assignedCollegeIds || roleFormData.assignedCollegeIds.length === 0) {
-      toast.error('Please select at least one college');
-      return;
-    }
     if (!roleFormData.permissions || roleFormData.permissions.length === 0) {
       toast.error('Please select at least one permission');
       return;
     }
 
     try {
-      const resolvedCourses = [];
-      const resolvedBranches = [];
-
-      (roleFormData.assignedCollegeScopes || []).forEach(scope => {
-        const cId = Number(scope.collegeId);
-        const collegeCourses = courses.filter(c => Number(c.college?.id) === cId);
-
-        const targetCourses = (scope.courses && scope.courses.length > 0)
-          ? collegeCourses.filter(c => scope.courses.includes(c.name))
-          : collegeCourses;
-
-        targetCourses.forEach(c => {
-          if (c.name) resolvedCourses.push(c.name.trim());
-        });
-
-        const targetCourseNames = targetCourses.map(c => c.name.trim().toLowerCase());
-        const collegeBranches = branches.filter(b => {
-          const bColId = Number(b.college?.id);
-          const bCourseName = (b.courseName || b.course?.name || b.course || '').trim().toLowerCase();
-          return (bColId === cId || targetCourseNames.includes(bCourseName)) && targetCourseNames.includes(bCourseName);
-        });
-
-        const targetBranches = (scope.branches && scope.branches.length > 0)
-          ? collegeBranches.filter(b => scope.branches.some(sb => sb.trim().toLowerCase() === b.name.trim().toLowerCase()))
-          : collegeBranches;
-
-        targetBranches.forEach(b => {
-          if (b.name) resolvedBranches.push(b.name.trim());
-        });
-      });
-
-      const uniqueAssignedCourses = [...new Set(resolvedCourses)];
-      const uniqueAssignedBranches = [...new Set(resolvedBranches)];
-
-      const cleanedScopes = (roleFormData.assignedCollegeScopes || []).map(scope => ({
-        collegeId: Number(scope.collegeId),
-        levels: scope.levels || [],
-        courses: (scope.courses || []).filter(c => c && c !== '__NONE__'),
-        branches: (scope.branches || []).filter(b => b && b !== '__NONE__')
-      }));
-
       const payload = {
         name: roleFormData.name.trim(),
-        description: roleFormData.description,
+        description: roleFormData.description || '',
         permissions: roleFormData.permissions,
-        permissionAccessLevels: roleFormData.permissionAccessLevels,
-        assignedCollegeIds: roleFormData.assignedCollegeIds,
-        assignedCollegeScopes: cleanedScopes,
-        assignedCourses: uniqueAssignedCourses,
-        assignedBranches: uniqueAssignedBranches,
-        courseAssignment: uniqueAssignedCourses.length > 0 ? 'selected' : 'all'
+        permissionAccessLevels: roleFormData.permissionAccessLevels || {},
+        courseAssignment: 'all',
+        assignedCourses: [],
+        assignedBranches: [],
+        assignedCollegeIds: [],
+        assignedCollegeScopes: []
       };
 
       const response = await api.post('/api/admin-management/custom-roles', payload);
@@ -1697,67 +1535,22 @@ const AdminManagement = () => {
       toast.error('Role name is required');
       return;
     }
-    if (!roleFormData.assignedCollegeIds || roleFormData.assignedCollegeIds.length === 0) {
-      toast.error('Please select at least one college');
-      return;
-    }
     if (!roleFormData.permissions || roleFormData.permissions.length === 0) {
       toast.error('Please select at least one permission');
       return;
     }
 
     try {
-      const resolvedCourses = [];
-      const resolvedBranches = [];
-
-      (roleFormData.assignedCollegeScopes || []).forEach(scope => {
-        const cId = Number(scope.collegeId);
-        const collegeCourses = courses.filter(c => Number(c.college?.id) === cId);
-
-        const targetCourses = (scope.courses && scope.courses.length > 0)
-          ? collegeCourses.filter(c => scope.courses.includes(c.name))
-          : collegeCourses;
-
-        targetCourses.forEach(c => {
-          if (c.name) resolvedCourses.push(c.name.trim());
-        });
-
-        const targetCourseNames = targetCourses.map(c => c.name.trim().toLowerCase());
-        const collegeBranches = branches.filter(b => {
-          const bColId = Number(b.college?.id);
-          const bCourseName = (b.courseName || b.course?.name || b.course || '').trim().toLowerCase();
-          return (bColId === cId || targetCourseNames.includes(bCourseName)) && targetCourseNames.includes(bCourseName);
-        });
-
-        const targetBranches = (scope.branches && scope.branches.length > 0)
-          ? collegeBranches.filter(b => scope.branches.some(sb => sb.trim().toLowerCase() === b.name.trim().toLowerCase()))
-          : collegeBranches;
-
-        targetBranches.forEach(b => {
-          if (b.name) resolvedBranches.push(b.name.trim());
-        });
-      });
-
-      const uniqueAssignedCourses = [...new Set(resolvedCourses)];
-      const uniqueAssignedBranches = [...new Set(resolvedBranches)];
-
-      const cleanedScopes = (roleFormData.assignedCollegeScopes || []).map(scope => ({
-        collegeId: Number(scope.collegeId),
-        levels: scope.levels || [],
-        courses: (scope.courses || []).filter(c => c && c !== '__NONE__'),
-        branches: (scope.branches || []).filter(b => b && b !== '__NONE__')
-      }));
-
       const payload = {
         name: roleFormData.name.trim(),
-        description: roleFormData.description,
+        description: roleFormData.description || '',
         permissions: roleFormData.permissions,
-        permissionAccessLevels: roleFormData.permissionAccessLevels,
-        assignedCollegeIds: roleFormData.assignedCollegeIds,
-        assignedCollegeScopes: cleanedScopes,
-        assignedCourses: uniqueAssignedCourses,
-        assignedBranches: uniqueAssignedBranches,
-        courseAssignment: uniqueAssignedCourses.length > 0 ? 'selected' : 'all'
+        permissionAccessLevels: roleFormData.permissionAccessLevels || {},
+        courseAssignment: 'all',
+        assignedCourses: [],
+        assignedBranches: [],
+        assignedCollegeIds: [],
+        assignedCollegeScopes: []
       };
 
       const response = await api.put(`/api/admin-management/custom-roles/${selectedRole._id}`, payload);
@@ -1786,42 +1579,13 @@ const AdminManagement = () => {
   };
 
   const openRoleModal = (role = null) => {
-    setRoleModalStep(1);
-    setRoleCollegeSearchQuery('');
     if (role) {
       setSelectedRole(role);
-      const assignedCourses = role.assignedCourses ? role.assignedCourses.map(course =>
-        typeof course === 'object' ? course.name : course
-      ) : [];
-      const assignedBranches = role.assignedBranches ? role.assignedBranches.map(branch =>
-        typeof branch === 'object' ? branch.name : branch
-      ) : [];
-
-      const assignedCollegeIds = (role.assignedCollegeIds || []).map(Number);
-      const assignedCollegeScopes = (role.assignedCollegeScopes && role.assignedCollegeScopes.length > 0)
-        ? role.assignedCollegeScopes.map(scope => ({
-            collegeId: Number(scope.collegeId),
-            levels: scope.levels || [],
-            courses: scope.courses || [],
-            branches: scope.branches || []
-          }))
-        : assignedCollegeIds.map(cId => ({
-            collegeId: Number(cId),
-            levels: [],
-            courses: assignedCourses,
-            branches: assignedBranches
-          }));
-
       setRoleFormData({
         name: role.name || '',
         description: role.description || '',
         permissions: role.permissions || [],
-        permissionAccessLevels: role.permissionAccessLevels || {},
-        courseAssignment: role.courseAssignment || (assignedCourses.length > 0 ? 'selected' : 'all'),
-        assignedCourses: assignedCourses,
-        assignedBranches: assignedBranches,
-        assignedCollegeIds: assignedCollegeIds,
-        assignedCollegeScopes: assignedCollegeScopes
+        permissionAccessLevels: role.permissionAccessLevels || {}
       });
     } else {
       setSelectedRole(null);
@@ -1829,21 +1593,11 @@ const AdminManagement = () => {
         name: '',
         description: '',
         permissions: [],
-        permissionAccessLevels: {},
-        courseAssignment: 'all',
-        assignedCourses: [],
-        assignedBranches: [],
-        assignedCollegeIds: [],
-        assignedCollegeScopes: []
+        permissionAccessLevels: {}
       });
     }
     setShowRoleModal(true);
   };
-
-
-
-  // Fetch courses is now handled in fetchData on mount
-  // Removed redundant useEffect to prevent race conditions and excessive API calls
 
   // Fetch branches when course is selected for principal
   useEffect(() => {
@@ -1914,62 +1668,92 @@ const AdminManagement = () => {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap sm:flex-nowrap space-x-1 bg-gray-100 p-1 rounded-lg mb-4 sm:mb-6 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('sub-admins')}
-          className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm font-medium ${activeTab === 'sub-admins'
-            ? 'bg-white text-blue-600 shadow-sm'
-            : 'text-gray-600 hover:text-gray-900'
+      {/* Tabs and View Mode Toggle */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 sm:mb-6">
+        <div className="flex flex-wrap sm:flex-nowrap space-x-1 bg-gray-100 p-1 rounded-lg overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('sub-admins')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm font-medium ${activeTab === 'sub-admins'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <UserGroupIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            Users
+          </button>
+          <button
+            onClick={() => setActiveTab('wardens')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'wardens'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+            Wardens
+          </button>
+          <button
+            onClick={() => setActiveTab('principals')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'principals'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <AcademicCapIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+            Principals
+          </button>
+          <button
+            onClick={() => setActiveTab('custom-roles')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'custom-roles'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <ShieldCheckIcon className="w-3 h-3 sm:w-4 sm:h-4" />
+            Custom Roles
+          </button>
+        </div>
+
+        {/* View Mode Toggle: List / Cards */}
+        <div className="flex items-center bg-gray-100 p-1 rounded-lg self-end sm:self-auto">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+              viewMode === 'list'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
-        >
-          <UserGroupIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          Users
-        </button>
-        <button
-          onClick={() => setActiveTab('wardens')}
-          className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'wardens'
-            ? 'bg-white text-blue-600 shadow-sm'
-            : 'text-gray-600 hover:text-gray-900'
+            title="List View"
+          >
+            <ListBulletIcon className="w-4 h-4" />
+            <span>List</span>
+          </button>
+          <button
+            onClick={() => setViewMode('cards')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+              viewMode === 'cards'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
             }`}
-        >
-          <HomeIcon className="w-3 h-3 sm:w-4 sm:h-4" />
-          Wardens
-        </button>
-        <button
-          onClick={() => setActiveTab('principals')}
-          className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'principals'
-            ? 'bg-white text-blue-600 shadow-sm'
-            : 'text-gray-600 hover:text-gray-900'
-            }`}
-        >
-          <AcademicCapIcon className="w-3 h-3 sm:w-4 sm:h-4" />
-          Principals
-        </button>
-        <button
-          onClick={() => setActiveTab('custom-roles')}
-          className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 rounded-md transition-colors whitespace-nowrap text-xs sm:text-sm ${activeTab === 'custom-roles'
-            ? 'bg-white text-blue-600 shadow-sm'
-            : 'text-gray-600 hover:text-gray-900'
-            }`}
-        >
-          <ShieldCheckIcon className="w-3 h-3 sm:w-4 sm:h-4" />
-          Custom Roles
-        </button>
+            title="Cards View"
+          >
+            <Squares2X2Icon className="w-4 h-4" />
+            <span>Cards</span>
+          </button>
+        </div>
       </div>
 
 
       {/* Custom Roles Tab */}
       {activeTab === 'custom-roles' && (
         <>
-          {/* Custom Roles List */}
           <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
             {customRoles.length === 0 ? (
               <div className="p-6 sm:p-8 text-center">
                 <ShieldCheckIcon className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-3" />
                 <p className="text-sm sm:text-base text-gray-500">No custom roles found</p>
               </div>
-            ) : (
+            ) : viewMode === 'list' ? (
+              /* Custom Roles List View */
               <div className="divide-y divide-gray-200">
                 {customRoles.map((role) => (
                   <div key={role._id} className="p-4 sm:p-6 hover:bg-gray-50 transition-colors">
@@ -2051,12 +1835,14 @@ const AdminManagement = () => {
                         <button
                           onClick={() => openRoleModal(role)}
                           className="p-1.5 sm:p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Edit Role"
                         >
                           <PencilIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
                         <button
                           onClick={() => handleDeleteRole(role._id)}
                           className="p-1.5 sm:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Delete Role"
                         >
                           <TrashIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                         </button>
@@ -2064,6 +1850,123 @@ const AdminManagement = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : (
+              /* Custom Roles Cards View */
+              <div className="p-4 sm:p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {customRoles.map((role) => (
+                    <div
+                      key={role._id}
+                      className="bg-white border border-gray-200 rounded-lg p-4 sm:p-5 hover:shadow-md transition-all duration-200 hover:border-gray-300 flex flex-col justify-between h-full"
+                    >
+                      <div>
+                        {/* Card Header */}
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-2 rounded-lg bg-purple-100 flex-shrink-0">
+                              <ShieldCheckIcon className="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-semibold text-gray-900 text-sm sm:text-base truncate" title={role.name}>
+                                {role.name}
+                              </h3>
+                              <span className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-full text-xs font-medium ${role.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                {role.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => openRoleModal(role)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit Role"
+                            >
+                              <PencilIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRole(role._id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Role"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        {role.description && (
+                          <p className="text-xs text-gray-600 mb-3 line-clamp-2" title={role.description}>
+                            {role.description}
+                          </p>
+                        )}
+
+                        {/* Permissions */}
+                        <div className="mb-3 space-y-1.5">
+                          <div className="text-xs font-medium text-gray-600">
+                            Permissions ({role.permissions?.length || 0})
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {role.permissions && role.permissions.slice(0, 4).map(permission => {
+                              const permissionLabel = PERMISSIONS.find(p => p.id === permission)?.label || permission;
+                              const accessLevel = role.permissionAccessLevels?.[permission] || 'view';
+                              return (
+                                <span key={permission} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs flex items-center gap-1">
+                                  <span className="truncate max-w-[120px]">{permissionLabel}</span>
+                                  <span className={`px-1 py-0.2 rounded text-[10px] ${accessLevel === 'full' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {accessLevel === 'full' ? 'Full' : 'View'}
+                                  </span>
+                                </span>
+                              );
+                            })}
+                            {role.permissions?.length > 4 && (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+                                +{role.permissions.length - 4} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Scope / Course Assignment Footer */}
+                      <div className="pt-2 border-t border-gray-100 text-xs">
+                        {role.assignedCollegeIds && role.assignedCollegeIds.length > 0 ? (
+                          <div className="space-y-1">
+                            <div className="text-[11px] font-semibold text-gray-700">Scope:</div>
+                            <div className="flex flex-wrap gap-1">
+                              {role.assignedCollegeIds.map(cId => {
+                                const col = colleges.find(c => Number(c.id) === Number(cId));
+                                return (
+                                  <span key={cId} className="px-1.5 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded text-[10px] font-medium">
+                                    {col?.code || col?.name || cId}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            {role.assignedCourses && role.assignedCourses.length > 0 ? (
+                              <div className="text-[11px] text-indigo-700 font-medium truncate">
+                                {role.assignedCourses.length} course{role.assignedCourses.length > 1 ? 's' : ''} ({role.assignedCourses.slice(0, 2).join(', ')}{role.assignedCourses.length > 2 ? '...' : ''})
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-gray-500">All Courses</div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="text-gray-600">Course Assignment: </span>
+                            <span className="font-medium text-gray-800">
+                              {role.courseAssignment === 'all' ? 'All Courses' : (
+                                role.assignedCourses && role.assignedCourses.length > 0 ? (
+                                  role.assignedCourses.map(c => typeof c === 'object' ? c.name : c).join(', ')
+                                ) : 'No courses selected'
+                              )}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -2073,14 +1976,265 @@ const AdminManagement = () => {
       {/* Admin Management Content */}
       {activeTab !== 'custom-roles' && (
         <>
-          {/* Users List - Card Layout */}
           <div className="bg-white rounded-lg sm:rounded-xl shadow-sm overflow-hidden">
             {currentData.length === 0 ? (
               <div className="p-6 sm:p-8 text-center">
                 <UserIcon className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-3" />
                 <p className="text-sm sm:text-base text-gray-500">No {isWardenTab ? 'wardens' : isPrincipalTab ? 'principals' : 'users'} found</p>
               </div>
+            ) : viewMode === 'list' ? (
+              /* Users / Wardens / Principals List View */
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-left text-xs sm:text-sm">
+                  <thead className="bg-gray-50 text-gray-600 font-semibold uppercase text-[11px] tracking-wider">
+                    <tr>
+                      <th className="px-4 py-3">
+                        {isWardenTab ? 'Warden' : isPrincipalTab ? 'Principal' : 'User'}
+                      </th>
+                      {!isWardenTab && !isPrincipalTab && (
+                        <>
+                          <th className="px-4 py-3">Role / Scope</th>
+                          <th className="px-4 py-3">Permissions</th>
+                        </>
+                      )}
+                      {isWardenTab && (
+                        <th className="px-4 py-3">Assigned Hostel</th>
+                      )}
+                      {isPrincipalTab && (
+                        <>
+                          <th className="px-4 py-3">Email</th>
+                          <th className="px-4 py-3">Colleges & Scope</th>
+                          <th className="px-4 py-3">Matching Courses</th>
+                        </>
+                      )}
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {currentData.filter(admin => admin && admin._id).map((admin) => (
+                      <tr key={admin._id} className="hover:bg-gray-50 transition-colors">
+                        {/* User identity cell */}
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg flex-shrink-0 ${isWardenTab ? 'bg-green-100 text-green-600' : isPrincipalTab ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                              {isWardenTab ? (
+                                <HomeIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                              ) : isPrincipalTab ? (
+                                <AcademicCapIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                              ) : (
+                                <ShieldCheckIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-gray-900 truncate">
+                                {admin.name || admin.username}
+                              </div>
+                              <div className="text-xs text-gray-500 truncate flex items-center gap-1.5 flex-wrap">
+                                <span>@{admin.username}</span>
+                                {admin.employeeId && (
+                                  <>
+                                    <span>•</span>
+                                    <span>Emp: {admin.employeeId}</span>
+                                  </>
+                                )}
+                                {admin.hrmsLinkType && (
+                                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${admin.hrmsLinkType === 'user' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    {admin.hrmsLinkType === 'user' ? 'User' : 'Employee'}
+                                  </span>
+                                )}
+                                {admin.usesHrmsAuth && (
+                                  <span className="text-indigo-600 font-medium text-[10px]">
+                                    (HRMS login)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Users Tab: Role / Scope */}
+                        {!isWardenTab && !isPrincipalTab && (
+                          <td className="px-4 py-3.5">
+                            <div className="space-y-1 max-w-[220px]">
+                              {admin.role === 'custom' && admin.customRoleId ? (
+                                <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                                  {admin.customRole || 'Custom Role'}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                                  User
+                                </span>
+                              )}
+                              {admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0 && (
+                                <div className="text-[11px] text-gray-500 truncate" title={admin.assignedCollegeIds.map(id => colleges.find(c => Number(c.id) === Number(id))?.code || id).join(', ')}>
+                                  {admin.assignedCollegeIds.length} college{admin.assignedCollegeIds.length > 1 ? 's' : ''} ({admin.assignedCollegeIds.map(id => colleges.find(c => Number(c.id) === Number(id))?.code || id).slice(0, 2).join(', ')}{admin.assignedCollegeIds.length > 2 ? '...' : ''})
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Users Tab: Permissions */}
+                        {!isWardenTab && !isPrincipalTab && (
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-wrap gap-1 max-w-[260px]">
+                              {admin.permissions && admin.permissions.slice(0, 2).map(permission => {
+                                const permissionLabel = PERMISSIONS.find(p => p.id === permission)?.label || permission;
+                                const accessLevel = admin.permissionAccessLevels?.[permission] || 'view';
+                                return (
+                                  <span key={permission} className="inline-flex items-center px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[11px]">
+                                    <span className="truncate max-w-[100px]">{permissionLabel}</span>
+                                    <span className={`ml-1 px-1 py-0.2 rounded text-[10px] ${accessLevel === 'full' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                      {accessLevel === 'full' ? 'Full' : 'View'}
+                                    </span>
+                                  </span>
+                                );
+                              })}
+                              {admin.permissions && admin.permissions.length > 2 && (
+                                <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded-full text-[11px]">
+                                  +{admin.permissions.length - 2}
+                                </span>
+                              )}
+                              {(!admin.permissions || admin.permissions.length === 0) && (
+                                <span className="text-gray-400 italic text-xs">No permissions</span>
+                              )}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Wardens Tab: Assigned Hostel */}
+                        {isWardenTab && (
+                          <td className="px-4 py-3.5">
+                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 inline-block">
+                              {admin.assignedHostelId?.name
+                                || hostels.find(h => h._id === (admin.assignedHostelId?._id || admin.assignedHostelId))?.name
+                                || (admin.hostelType === 'boys' ? 'Boys Hostel' : admin.hostelType === 'girls' ? 'Girls Hostel' : 'No hostel assigned')}
+                            </span>
+                          </td>
+                        )}
+
+                        {/* Principals Tab: Email */}
+                        {isPrincipalTab && (
+                          <td className="px-4 py-3.5">
+                            {admin.email ? (
+                              <span className="text-xs text-gray-600 truncate max-w-[180px] inline-block" title={admin.email}>
+                                {admin.email}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded-full text-[11px] font-medium">
+                                No email
+                              </span>
+                            )}
+                          </td>
+                        )}
+
+                        {/* Principals Tab: Colleges & Scope */}
+                        {isPrincipalTab && (
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-wrap gap-1 max-w-[200px]">
+                              {admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0 ? (
+                                admin.assignedCollegeIds.map(id => {
+                                  const college = colleges.find(c => c.id === id);
+                                  return (
+                                    <span key={id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-100">
+                                      {college?.name || id}
+                                    </span>
+                                  );
+                                })
+                              ) : (
+                                <span className="text-gray-400 italic text-xs">None</span>
+                              )}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Principals Tab: Courses */}
+                        {isPrincipalTab && (
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              {(() => {
+                                const targetCollegeIds = admin.assignedCollegeIds && admin.assignedCollegeIds.length > 0
+                                  ? admin.assignedCollegeIds
+                                  : admin.assignedCollegeId ? [admin.assignedCollegeId] : [];
+
+                                if (targetCollegeIds.length > 0) {
+                                  const filteredCourses = courses.filter(course => {
+                                    const scope = admin.assignedCollegeScopes?.find(item => Number(item.collegeId) === Number(course.college?.id));
+                                    const levels = scope?.levels || admin.assignedLevels || [];
+                                    return course.college &&
+                                      targetCollegeIds.includes(course.college.id) &&
+                                      levels.map(level => level.toLowerCase()).includes(course.level?.toLowerCase());
+                                  });
+
+                                  if (filteredCourses.length > 0) {
+                                    const displayCourses = filteredCourses.slice(0, 2);
+                                    const remaining = filteredCourses.length - 2;
+                                    return (
+                                      <>
+                                        {displayCourses.map((course) => (
+                                          <span key={course._id} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-medium border border-indigo-100 truncate max-w-[110px]" title={course.name}>
+                                            {course.name}
+                                          </span>
+                                        ))}
+                                        {remaining > 0 && (
+                                          <span className="px-1.5 py-0.5 bg-gray-50 text-gray-500 rounded-full text-[10px] border border-gray-200">
+                                            +{remaining}
+                                          </span>
+                                        )}
+                                      </>
+                                    );
+                                  }
+                                  return <span className="text-xs text-gray-400 italic">No courses</span>;
+                                }
+                                return <span className="text-xs text-gray-400 italic">No college assigned</span>;
+                              })()}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Status cell */}
+                        <td className="px-4 py-3.5">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${admin.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {admin.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+
+                        {/* Actions cell */}
+                        <td className="px-4 py-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openEditModal(admin)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title={!isWardenTab && !isPrincipalTab ? 'Edit User' : isWardenTab ? 'Edit Warden' : 'Edit Principal'}
+                            >
+                              <PencilIcon className="w-4 h-4" />
+                            </button>
+                            {!isWardenTab && !isPrincipalTab && !admin.usesHrmsAuth && (
+                              <button
+                                onClick={() => openPasswordResetModal(admin)}
+                                className="p-1.5 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                title="Reset Password"
+                              >
+                                <KeyIcon className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteAdmin(admin._id)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title={!isWardenTab && !isPrincipalTab ? 'Delete User' : isWardenTab ? 'Delete Warden' : 'Delete Principal'}
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
+              /* Users / Wardens / Principals Cards View */
               <div className="p-4 sm:p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                   {currentData.filter(admin => admin && admin._id).map((admin) => (
@@ -3746,6 +3900,89 @@ const AdminManagement = () => {
                             )}
                           </div>
                         </div>
+
+                        {/* PAGE ACCESS & PERMISSIONS FOR PRINCIPAL */}
+                        <div className="col-span-1 lg:col-span-2 p-4 bg-purple-50/50 rounded-xl border border-purple-200 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-purple-100">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                                <ShieldCheckIcon className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-semibold text-gray-900">Page Access</h3>
+                                <p className="text-xs text-gray-500">Select which pages and modules this principal can access in their dashboard</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const allIds = PRINCIPAL_PAGE_PERMISSIONS.flatMap(p => p.altId ? [p.id, p.altId] : [p.id]);
+                                  setFormData(prev => ({ ...prev, permissions: [...new Set([...(prev.permissions || []), ...allIds])] }));
+                                }}
+                                className="text-xs font-semibold text-purple-700 hover:text-purple-900 px-2.5 py-1 rounded-md bg-white border border-purple-200 hover:bg-purple-100/50 transition-colors"
+                              >
+                                Select All
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const removeIds = new Set(PRINCIPAL_PAGE_PERMISSIONS.flatMap(p => p.altId ? [p.id, p.altId] : [p.id]));
+                                  setFormData(prev => ({ ...prev, permissions: (prev.permissions || []).filter(p => !removeIds.has(p)) }));
+                                }}
+                                className="text-xs font-semibold text-gray-600 hover:text-gray-800 px-2.5 py-1 rounded-md bg-white border border-gray-200 hover:bg-gray-100 transition-colors"
+                              >
+                                Clear All
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                            {PRINCIPAL_PAGE_PERMISSIONS.map(page => {
+                              const isChecked = (formData.permissions || []).includes(page.id) ||
+                                (page.altId && (formData.permissions || []).includes(page.altId));
+
+                              return (
+                                <label
+                                  key={page.id}
+                                  className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-all ${
+                                    isChecked
+                                      ? 'bg-white border-purple-400 shadow-2xs'
+                                      : 'bg-white/60 border-gray-200 opacity-60 hover:opacity-100 hover:border-gray-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      setFormData(prev => {
+                                        const current = prev.permissions || [];
+                                        const toAddOrRemove = page.altId ? [page.id, page.altId] : [page.id];
+                                        const updated = checked
+                                          ? [...new Set([...current, ...toAddOrRemove])]
+                                          : current.filter(p => !toAddOrRemove.includes(p));
+                                        return { ...prev, permissions: updated };
+                                      });
+                                    }}
+                                    className="mt-0.5 w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs font-semibold text-gray-900">{page.label}</span>
+                                      {isChecked && (
+                                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-purple-100 text-purple-700 font-medium">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-gray-500 leading-tight mt-0.5">{page.description}</p>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                     )}
 
@@ -3827,7 +4064,7 @@ const AdminManagement = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 w-full max-w-5xl sm:max-w-6xl mx-2 sm:mx-4 max-h-[92vh] overflow-y-auto"
+              className="bg-white rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 w-full max-w-3xl mx-2 sm:mx-4 max-h-[92vh] overflow-y-auto"
             >
               {/* Modal Header */}
               <div className="flex justify-between items-center pb-3 sm:pb-4 border-b border-gray-100 mb-4 sm:mb-5">
@@ -3839,7 +4076,7 @@ const AdminManagement = () => {
                     <h2 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">
                       {selectedRole ? 'Edit Custom Role' : 'Create Custom Role'}
                     </h2>
-                    <p className="text-xs text-gray-500">Configure role identity, academic college scope, and permission levels</p>
+                    <p className="text-xs text-gray-500">Configure role identity and permission access levels</p>
                   </div>
                 </div>
                 <button
@@ -3850,584 +4087,110 @@ const AdminManagement = () => {
                 </button>
               </div>
 
-              {/* Stepper Header */}
-              <div className="mb-5 sm:mb-6 px-1">
-                <div className="flex items-center justify-between max-w-xl mx-auto">
-                  {/* Step 1 Pill */}
-                  <div
-                    onClick={() => setRoleModalStep(1)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-all ${
-                      roleModalStep === 1
-                        ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-600/30'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold ${
-                      roleModalStep === 1 ? 'bg-white text-purple-600' : 'bg-gray-200 text-gray-700'
-                    }`}>
-                      1
-                    </span>
-                    <span>Role Identity & Scope</span>
+              {/* Form Content */}
+              <form onSubmit={selectedRole ? handleUpdateRole : handleCreateRole} className="space-y-4 sm:space-y-5">
+                {/* Role Details */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4">
+                  <div>
+                    <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">
+                      Role Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={roleFormData.name}
+                      onChange={handleRoleFormChange}
+                      required
+                      className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      placeholder="e.g. Maintenance, Campus Officer, Security"
+                    />
                   </div>
 
-                  <div className={`flex-1 h-0.5 mx-2 rounded-full transition-colors ${roleModalStep === 2 ? 'bg-purple-600' : 'bg-gray-200'}`} />
-
-                  {/* Step 2 Pill */}
-                  <div
-                    onClick={() => {
-                      if (roleFormData.name?.trim() && roleFormData.assignedCollegeIds?.length > 0) {
-                        setRoleModalStep(2);
-                      }
-                    }}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                      roleModalStep === 2
-                        ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-600/30'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 cursor-pointer'
-                    }`}
-                  >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold ${
-                      roleModalStep === 2 ? 'bg-white text-purple-600' : 'bg-gray-200 text-gray-700'
-                    }`}>
-                      2
-                    </span>
-                    <span>Permissions & Access</span>
+                  <div>
+                    <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      name="description"
+                      value={roleFormData.description}
+                      onChange={handleRoleFormChange}
+                      rows="2"
+                      className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      placeholder="Brief description of this custom role..."
+                    />
                   </div>
                 </div>
-              </div>
 
-              {/* Form Content */}
-              <form onSubmit={selectedRole ? handleUpdateRole : handleCreateRole} className="space-y-4">
-                {roleModalStep === 1 ? (
-                  /* STEP 1: CARD 1 & CARD 2 */
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-start">
-                      {/* CARD 1: Role Information & College Selection */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4 flex flex-col">
-                        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-sm shadow-sm">
-                              1
-                            </div>
-                            <div>
-                              <h3 className="text-sm sm:text-base font-semibold text-gray-900">Role Info & Colleges</h3>
-                              <p className="text-xs text-gray-500">Define role identity & link colleges</p>
-                            </div>
-                          </div>
-                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                            Card 1
-                          </span>
-                        </div>
+                {/* Permissions Card */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                    <div>
+                      <h3 className="text-sm sm:text-base font-semibold text-gray-900">
+                        Permissions & Access Levels <span className="text-red-500">*</span>
+                      </h3>
+                      <p className="text-xs text-gray-500">Toggle permissions and choose View vs Full access</p>
+                    </div>
+                    <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-100">
+                      {roleFormData.permissions.length} Selected
+                    </span>
+                  </div>
 
-                        {/* Name & Description */}
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">
-                              Role Name <span className="text-red-500">*</span>
-                            </label>
+                  <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+                    {PERMISSIONS.map(permission => (
+                      <div key={permission.id} className="p-3 bg-gray-50/70 hover:bg-gray-50 border border-gray-200 rounded-lg transition-colors">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <label className="flex items-center gap-2.5 cursor-pointer">
                             <input
-                              type="text"
-                              name="name"
-                              value={roleFormData.name}
+                              type="checkbox"
+                              value={permission.id}
+                              checked={roleFormData.permissions.includes(permission.id)}
                               onChange={handleRoleFormChange}
-                              required
-                              className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                              placeholder="e.g. Campus Officer, Academic Coordinator"
+                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
                             />
-                          </div>
+                            <span className="text-sm font-medium text-gray-800">{permission.label}</span>
+                          </label>
 
-                          <div>
-                            <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1">
-                              Description
-                            </label>
-                            <textarea
-                              name="description"
-                              value={roleFormData.description}
-                              onChange={handleRoleFormChange}
-                              rows="2"
-                              className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                              placeholder="Brief description of this custom role..."
-                            />
-                          </div>
-                        </div>
-
-                        {/* College Selection */}
-                        <div className="space-y-2 pt-2 border-t border-gray-100">
-                          <div className="flex items-center justify-between">
-                            <label className="text-xs font-semibold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
-                              <BuildingOffice2Icon className="w-4 h-4 text-purple-600" />
-                              Assigned Colleges <span className="text-red-500">*</span>
-                            </label>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={handleRoleSelectAllColleges}
-                                className="text-xs text-purple-600 hover:text-purple-800 font-medium px-2 py-0.5 rounded hover:bg-purple-50"
-                              >
-                                Select All
-                              </button>
-                              <span className="text-gray-300">|</span>
-                              <button
-                                type="button"
-                                onClick={handleRoleClearAllColleges}
-                                className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2 py-0.5 rounded hover:bg-gray-100"
-                              >
-                                Clear
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* College Search input */}
-                          <div className="relative">
-                            <input
-                              type="text"
-                              value={roleCollegeSearchQuery}
-                              onChange={(e) => setRoleCollegeSearchQuery(e.target.value)}
-                              placeholder="Search colleges..."
-                              className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-purple-500"
-                            />
-                            <MagnifyingGlassIcon className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
-                          </div>
-
-                          {/* Selected Colleges Pills */}
-                          {roleFormData.assignedCollegeIds?.length > 0 && (
-                            <div className="flex flex-wrap gap-1 p-2 bg-purple-50/50 rounded-lg border border-purple-100 max-h-24 overflow-y-auto">
-                              {roleFormData.assignedCollegeIds.map(id => {
-                                const col = colleges.find(c => Number(c.id) === Number(id));
-                                return (
-                                  <span
-                                    key={id}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-purple-200 text-purple-800 rounded text-xs font-medium shadow-2xs"
-                                  >
-                                    <span className="truncate max-w-[140px]">{col?.name || `College ${id}`}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRoleCollegeToggle(id)}
-                                      className="text-purple-400 hover:text-purple-700 ml-0.5"
-                                    >
-                                      ×
-                                    </button>
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* College Checkbox List */}
-                          <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-56 overflow-y-auto bg-white">
-                            {colleges
-                              .filter(c => {
-                                if (!roleCollegeSearchQuery) return true;
-                                const q = roleCollegeSearchQuery.toLowerCase();
-                                return (
-                                  (c.name && c.name.toLowerCase().includes(q)) ||
-                                  (c.code && c.code.toLowerCase().includes(q))
-                                );
-                              })
-                              .map(college => {
-                                const isChecked = roleFormData.assignedCollegeIds?.includes(Number(college.id));
-                                return (
-                                  <label
-                                    key={college.id}
-                                    className={`flex items-center gap-3 p-2.5 cursor-pointer transition-colors ${
-                                      isChecked ? 'bg-purple-50/60 hover:bg-purple-50' : 'hover:bg-gray-50'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked}
-                                      onChange={() => handleRoleCollegeToggle(college.id)}
-                                      className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium text-gray-900 truncate">{college.name}</span>
-                                        {college.code && (
-                                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-mono font-semibold shrink-0">
-                                            {college.code}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </label>
-                                );
-                              })}
-                            {colleges.length === 0 && (
-                              <div className="p-4 text-center text-xs text-gray-500">No colleges available</div>
-                            )}
-                          </div>
-                          {(!roleFormData.assignedCollegeIds || roleFormData.assignedCollegeIds.length === 0) && (
-                            <p className="text-xs text-amber-600 font-medium">
-                              ⚠️ Select at least one college to configure Courses & Branches in Card 2.
-                            </p>
+                          {/* Access Level Selector */}
+                          {roleFormData.permissions.includes(permission.id) && (
+                            permission.id === 'staff_guests_management' ? (
+                              <StaffGuestsAccessSelector
+                                accessLevels={roleFormData.permissionAccessLevels || {}}
+                                onAccessLevelChange={handleRoleAccessLevelChange}
+                              />
+                            ) : (
+                              <AccessLevelSelector
+                                permissionId={permission.id}
+                                permissionLabel={permission.label}
+                                accessLevel={(roleFormData.permissionAccessLevels && roleFormData.permissionAccessLevels[permission.id]) || 'view'}
+                                onAccessLevelChange={handleRoleAccessLevelChange}
+                                disabled={false}
+                              />
+                            )
                           )}
                         </div>
                       </div>
-
-                      {/* CARD 2: Branch & Course Scope */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4 flex flex-col">
-                        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                          <div className="flex items-center gap-2.5">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shadow-sm ${
-                              roleFormData.assignedCollegeIds?.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'
-                            }`}>
-                              2
-                            </div>
-                            <div>
-                              <h3 className="text-sm sm:text-base font-semibold text-gray-900">Branch & Course Scope</h3>
-                              <p className="text-xs text-gray-500">
-                                {roleFormData.assignedCollegeIds?.length > 0
-                                  ? `Limiting scope for ${roleFormData.assignedCollegeIds.length} college${roleFormData.assignedCollegeIds.length > 1 ? 's' : ''}`
-                                  : 'Pending college selection'}
-                              </p>
-                            </div>
-                          </div>
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                            roleFormData.assignedCollegeIds?.length > 0
-                              ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
-                              : 'bg-gray-100 text-gray-400 border-gray-200'
-                          }`}>
-                            Card 2
-                          </span>
-                        </div>
-
-                        {/* Card 2 Body */}
-                        {(!roleFormData.assignedCollegeIds || roleFormData.assignedCollegeIds.length === 0) ? (
-                          <div className="flex-1 flex flex-col items-center justify-center py-16 px-4 text-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-100 text-purple-600 flex items-center justify-center mb-3 shadow-inner">
-                              <AcademicCapIcon className="w-7 h-7" />
-                            </div>
-                            <h4 className="text-base font-semibold text-gray-800 mb-1">Select Colleges in Card 1</h4>
-                            <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-                              Select one or more colleges on the left to configure branch and course restrictions for this custom role.
-                            </p>
-                            <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-gray-200 rounded-full text-[11px] font-medium text-gray-600 shadow-2xs">
-                              <span>👈 Select College in Card 1 first</span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <div className="p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg flex items-center justify-between text-xs text-indigo-900">
-                              <span className="font-medium">
-                                Users with this role will be strictly limited to these branches and courses.
-                              </span>
-                              <span className="text-[11px] font-semibold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
-                                {roleFormData.assignedCollegeIds.length} College{roleFormData.assignedCollegeIds.length > 1 ? 's' : ''}
-                              </span>
-                            </div>
-
-                            {/* List of College Scopes */}
-                            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-                              {roleFormData.assignedCollegeIds.map(cId => {
-                                const collegeId = Number(cId);
-                                const col = colleges.find(c => Number(c.id) === collegeId);
-                                if (!col) return null;
-
-                                const scope = (roleFormData.assignedCollegeScopes || []).find(s => Number(s.collegeId) === collegeId) || { collegeId, courses: [], branches: [] };
-                                const colCourses = courses.filter(c => Number(c.college?.id) === collegeId);
-                                const isNoneCourses = scope.courses && scope.courses.length === 1 && scope.courses[0] === '__NONE__';
-                                const isAllCourses = !isNoneCourses && (!scope.courses || scope.courses.length === 0);
-                                const selectedCourses = isNoneCourses ? [] : (isAllCourses ? colCourses.map(c => c.name) : scope.courses);
-
-                                const colBranches = branches.filter(b => {
-                                  const bColId = Number(b.college?.id);
-                                  const bCourse = b.courseName || b.course?.name || b.course;
-                                  return (bColId === collegeId || !bColId) && selectedCourses.includes(bCourse);
-                                });
-                                const isNoneBranches = scope.branches && scope.branches.length === 1 && scope.branches[0] === '__NONE__';
-                                const isAllBranches = !isNoneBranches && (!scope.branches || scope.branches.length === 0);
-                                const selectedBranches = isNoneBranches ? [] : (isAllBranches ? colBranches.map(b => b.name) : scope.branches);
-
-                                return (
-                                  <div key={collegeId} className="border border-gray-200 rounded-lg p-3 bg-gray-50/40 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-semibold text-sm text-gray-900">{col.name}</span>
-                                        {col.code && (
-                                          <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-mono font-bold">
-                                            {col.code}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {/* Course Selection */}
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                                          <AcademicCapIcon className="w-3.5 h-3.5 text-indigo-600" />
-                                          Courses ({colCourses.length})
-                                        </span>
-                                        <div className="flex items-center gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRoleSelectAllCollegeCourses(collegeId, colCourses.map(c => c.name))}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                                              isAllCourses
-                                                ? 'bg-indigo-600 text-white shadow-2xs'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
-                                            }`}
-                                          >
-                                            All
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRoleClearCollegeCourses(collegeId)}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                                              isNoneCourses
-                                                ? 'bg-rose-600 text-white shadow-2xs'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
-                                            }`}
-                                          >
-                                            Clear
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto p-1.5 bg-white border border-gray-200 rounded-lg">
-                                        {colCourses.map(course => {
-                                          const isSelected = selectedCourses.includes(course.name);
-                                          return (
-                                            <button
-                                              key={course._id || course.name}
-                                              type="button"
-                                              onClick={() => handleRoleToggleCollegeCourse(collegeId, course.name, colCourses)}
-                                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-all ${
-                                                isSelected
-                                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:bg-gray-50 opacity-60'
-                                              }`}
-                                            >
-                                              {isSelected ? (
-                                                <CheckIcon className="w-3 h-3" />
-                                              ) : (
-                                                <PlusIcon className="w-3 h-3" />
-                                              )}
-                                              <span>{course.name}</span>
-                                            </button>
-                                          );
-                                        })}
-                                        {colCourses.length === 0 && (
-                                          <span className="text-xs text-gray-400 italic">No courses found for this college</span>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {/* Branch Selection */}
-                                    <div className="space-y-1.5 pt-2.5 border-t border-gray-200/70">
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                                          <Squares2X2Icon className="w-3.5 h-3.5 text-indigo-600" />
-                                          Branches ({colBranches.length})
-                                        </span>
-                                        <div className="flex items-center gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRoleSelectAllCollegeBranches(collegeId)}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                                              isAllBranches
-                                                ? 'bg-indigo-600 text-white shadow-2xs'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
-                                            }`}
-                                          >
-                                            All
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRoleClearCollegeBranches(collegeId)}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-                                              isNoneBranches
-                                                ? 'bg-rose-600 text-white shadow-2xs'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
-                                            }`}
-                                          >
-                                            Clear
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex flex-wrap gap-1 max-h-36 overflow-y-auto p-1.5 bg-white border border-gray-200 rounded-lg">
-                                        {colBranches.map(branch => {
-                                          const isSelected = selectedBranches.includes(branch.name);
-                                          return (
-                                            <button
-                                              key={branch._id || branch.name}
-                                              type="button"
-                                              onClick={() => handleRoleToggleCollegeBranch(collegeId, branch.name, colBranches)}
-                                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-all ${
-                                                isSelected
-                                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                                                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:bg-gray-50 opacity-60'
-                                              }`}
-                                            >
-                                              {isSelected ? (
-                                                <CheckIcon className="w-3 h-3" />
-                                              ) : (
-                                                <PlusIcon className="w-3 h-3" />
-                                              )}
-                                              <span>{branch.name}</span>
-                                              {branch.courseName && (
-                                                <span className={`text-[9px] px-1 py-0.2 rounded font-mono ${
-                                                  isSelected ? 'bg-indigo-700 text-indigo-100' : 'bg-gray-100 text-gray-500'
-                                                }`}>
-                                                  {branch.courseName}
-                                                </span>
-                                              )}
-                                            </button>
-                                          );
-                                        })}
-                                        {colBranches.length === 0 && (
-                                          <span className="text-xs text-gray-400 italic p-1">
-                                            {colCourses.length === 0 ? 'No branches available' : 'Select at least one course above to see branches'}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Step 1 Navigation Footer */}
-                    <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-gray-200">
-                      <button
-                        type="button"
-                        onClick={resetForm}
-                        className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
-                      >
-                        Cancel
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleProceedToRolePermissions}
-                        className="px-5 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm flex items-center gap-2 shadow-sm transition-all"
-                      >
-                        <span>Next: Permissions & Access Control</span>
-                        <ArrowRightIcon className="w-4 h-4" />
-                      </button>
-                    </div>
+                    ))}
                   </div>
-                ) : (
-                  /* STEP 2: PERMISSIONS & ACCESS CONTROL */
-                  <div className="space-y-4">
-                    {/* Summary Scope Banner */}
-                    <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 border border-purple-200 rounded-xl p-3 sm:p-4 shadow-2xs">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-gray-900">{roleFormData.name || 'Custom Role'}</span>
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full text-[11px] font-semibold">
-                              Step 2: Permissions & Access Control
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-wrap text-xs text-gray-600">
-                            <span className="font-semibold text-gray-700">Scoped Colleges:</span>
-                            {roleFormData.assignedCollegeIds?.map(id => {
-                              const col = colleges.find(c => Number(c.id) === Number(id));
-                              return (
-                                <span key={id} className="px-2 py-0.5 bg-white text-purple-800 border border-purple-200 rounded text-[11px] font-semibold shadow-2xs">
-                                  {col?.code || col?.name || id}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
+                </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setRoleModalStep(1)}
-                          className="self-start sm:self-center px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors shrink-0"
-                        >
-                          <ArrowLeftIcon className="w-3.5 h-3.5" />
-                          <span>Edit Scope & Colleges</span>
-                        </button>
-                      </div>
-                    </div>
+                {/* Modal Footer */}
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
 
-                    {/* Permissions Card */}
-                    <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-3">
-                      <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-                        <div>
-                          <h3 className="text-sm sm:text-base font-semibold text-gray-900">Permissions & Access Levels</h3>
-                          <p className="text-xs text-gray-500">Toggle permissions and choose View vs Full access</p>
-                        </div>
-                        <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-100">
-                          {roleFormData.permissions.length} Selected
-                        </span>
-                      </div>
-
-                      <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-                        {PERMISSIONS.map(permission => (
-                          <div key={permission.id} className="p-3 bg-gray-50/70 hover:bg-gray-50 border border-gray-200 rounded-lg transition-colors">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <label className="flex items-center gap-2.5 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  value={permission.id}
-                                  checked={roleFormData.permissions.includes(permission.id)}
-                                  onChange={handleRoleFormChange}
-                                  className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                                />
-                                <span className="text-sm font-medium text-gray-800">{permission.label}</span>
-                              </label>
-
-                              {/* Access Level Selector */}
-                              {roleFormData.permissions.includes(permission.id) && (
-                                permission.id === 'staff_guests_management' ? (
-                                  <StaffGuestsAccessSelector
-                                    accessLevels={roleFormData.permissionAccessLevels || {}}
-                                    onAccessLevelChange={handleRoleAccessLevelChange}
-                                  />
-                                ) : (
-                                  <AccessLevelSelector
-                                    permissionId={permission.id}
-                                    permissionLabel={permission.label}
-                                    accessLevel={(roleFormData.permissionAccessLevels && roleFormData.permissionAccessLevels[permission.id]) || 'view'}
-                                    onAccessLevelChange={handleRoleAccessLevelChange}
-                                    disabled={false}
-                                  />
-                                )
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Step 2 Navigation Footer */}
-                    <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-gray-200">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={resetForm}
-                          className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRoleModalStep(1)}
-                          className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-medium flex items-center gap-1.5"
-                        >
-                          <ArrowLeftIcon className="w-3.5 h-3.5" />
-                          <span>Back to Scope</span>
-                        </button>
-                      </div>
-
-                      <button
-                        type="submit"
-                        className="px-5 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm flex items-center gap-2 shadow-sm transition-all"
-                      >
-                        <CheckIcon className="w-4 h-4" />
-                        <span>{selectedRole ? 'Update Custom Role' : 'Create Custom Role'}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm flex items-center gap-2 shadow-sm transition-all"
+                  >
+                    <CheckIcon className="w-4 h-4" />
+                    <span>{selectedRole ? 'Update Custom Role' : 'Create Custom Role'}</span>
+                  </button>
+                </div>
               </form>
             </motion.div>
           </motion.div>
