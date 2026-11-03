@@ -153,7 +153,12 @@ const TakeAttendance = ({ onStatsUpdate }) => {
       });
 
       if (response.data.success) {
-        toast.success(`Attendance saved for ${response.data.data.successful} students`);
+        if (response.data.data?.errors > 0) {
+          toast.success(`Attendance saved for ${response.data.data.successful} students`);
+          toast.error(`${response.data.data.errors} student(s) could not be saved`);
+        } else {
+          toast.success(`Attendance saved for ${response.data.data.successful} students`);
+        }
         fetchStudents(); // Refresh data
       }
     } catch (error) {

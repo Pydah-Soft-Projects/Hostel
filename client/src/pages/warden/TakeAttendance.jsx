@@ -736,9 +736,16 @@ const TakeAttendance = () => {
       });
 
       if (response.data.success) {
-        toast.success(`Attendance saved for ${response.data.data.successful} students`, {
-          id: 'attendance-progress'
-        });
+        if (response.data.data?.errors > 0) {
+          toast.success(`Attendance saved for ${response.data.data.successful} students`, {
+            id: 'attendance-progress'
+          });
+          toast.error(`${response.data.data.errors} student(s) could not be saved`);
+        } else {
+          toast.success(`Attendance saved for ${response.data.data.successful} students`, {
+            id: 'attendance-progress'
+          });
+        }
         fetchStudentsData(); // Refresh data
       }
     } catch (error) {

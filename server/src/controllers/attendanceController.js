@@ -69,7 +69,6 @@ export const getEffectiveJoiningDate = (student) => {
   if (!student) return null;
   if (student.joiningDate) return new Date(student.joiningDate);
   if (student.admitDate) return new Date(student.admitDate);
-  if (student.createdAt) return new Date(student.createdAt);
   return null;
 };
 
@@ -405,9 +404,8 @@ export const takeAttendance = async (req, res, next) => {
     // Batch validate all students at once
     const validStudents = await User.find({ 
       _id: { $in: studentIds }, 
-      role: 'student',
-      applicationStatus: { $in: ['Active', 'Extended'] }
-    }).select('_id name joiningDate admitDate createdAt applicationStatus');
+      role: 'student'
+    }).select('_id name joiningDate admitDate createdAt applicationStatus hostelStatus');
 
     console.log('📌 [takeAttendance] DB query matched students count:', validStudents.length);
     if (validStudents.length > 0) {
@@ -441,18 +439,6 @@ export const takeAttendance = async (req, res, next) => {
       }
 
       const studentObj = studentMap.get(studentId.toString());
-      const effectiveJoining = getEffectiveJoiningDate(studentObj);
-      if (effectiveJoining) {
-        const joiningStart = normalizeToISTStartOfDay(effectiveJoining);
-        if (normalizedDate < joiningStart) {
-          console.warn(`📌 [takeAttendance] Skipping student ${studentObj.name} (${studentId}): normalizedDate ${normalizedDate.toISOString()} < joiningStart ${joiningStart.toISOString()}`);
-          errors.push({
-            studentId,
-            error: `Attendance for ${studentObj.name || 'student'} opens only from joining date (${effectiveJoining.toLocaleDateString()})`
-          });
-          continue;
-        }
-      }
 
       // Prepare upsert operation
       bulkOps.push({
@@ -640,8 +626,9 @@ export const getAttendanceForDate = async (req, res, next) => {
       }
     }
 
-    // Attendance opens strictly from effective joining date (joiningDate -> admitDate -> createdAt)
-    if (normalizedDate && students.length > 0) {
+    // Attendance opens strictly from effective joining date (joiningDate -> admitDate)
+    // For academic-year based attendance, the roster is already academic-year scoped.
+    if (!academicYear && normalizedDate && students.length > 0) {
       students = students.filter(student => {
         const effectiveJoining = getEffectiveJoiningDate(student);
         if (!effectiveJoining) return true;
