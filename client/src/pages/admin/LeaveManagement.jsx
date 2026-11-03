@@ -14,8 +14,7 @@ import {
   PhoneIcon,
   ArrowRightIcon,
   ChevronDownIcon,
-  ChevronUpIcon,
-  ChevronRightIcon
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import SEO from '../../components/SEO';
 
@@ -37,12 +36,6 @@ const formatDateDash = (value) => {
     return `${parts[2]}-${parts[1]}-${parts[0]}`;
   }
   return formatDateIndia(value);
-};
-
-const getWeekdayIndia = (value) => {
-  if (!value) return '';
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short' });
 };
 
 const formatDateTimeIndia = (value) => value
@@ -83,33 +76,32 @@ const LeaveManagement = () => {
   });
   const [approvalRangeDays, setApprovalRangeDays] = useState('3');
   const [approvalDateRange, setApprovalDateRange] = useState(getDefaultApprovalDateRange);
-  const [approvalSummary, setApprovalSummary] = useState([]);
+  const [approvalSummary, setApprovalSummary] = useState(null);
   const [approvalSummaryLoading, setApprovalSummaryLoading] = useState(false);
-  const [expandedTypes, setExpandedTypes] = useState(new Set());
+  const [approvalSummaryError, setApprovalSummaryError] = useState('');
+  const dailyApprovalRows = useMemo(() => {
+    if (!approvalSummary || !approvalDateRange.fromDate || !approvalDateRange.toDate) return [];
 
-  const toggleType = (typeKey) => {
-    setExpandedTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(typeKey)) {
-        next.delete(typeKey);
-      } else {
-        next.add(typeKey);
-      }
-      return next;
-    });
-  };
+    const start = new Date(`${approvalDateRange.fromDate}T00:00:00.000Z`);
+    const end = new Date(`${approvalDateRange.toDate}T00:00:00.000Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
 
-  const handleExpandAllTypes = () => {
-    setExpandedTypes(new Set(['Leave', 'Permission', 'Stay in Hostel', 'total']));
-  };
-
-  const handleCollapseAllTypes = () => {
-    setExpandedTypes(new Set());
-  };
-
-  const sortedDays = useMemo(() => {
-    return [...(approvalSummary.days || [])].sort((a, b) => a.date.localeCompare(b.date));
-  }, [approvalSummary.days]);
+    const daysByDate = new Map((approvalSummary.days || []).map(day => [day.date, day]));
+    const rows = [];
+    for (const date = new Date(start); date <= end; date.setUTCDate(date.getUTCDate() + 1)) {
+      const dateKey = date.toISOString().slice(0, 10);
+      rows.push({
+        date: dateKey,
+        requests: 0,
+        pending: 0,
+        rejected: 0,
+        wardenApproved: 0,
+        principalApproved: 0,
+        ...daysByDate.get(dateKey)
+      });
+    }
+    return rows;
+  }, [approvalSummary, approvalDateRange]);
 
   // Debounce filters to reduce API calls
   const debouncedFilters = useDebounce(filters, 500);
@@ -230,14 +222,20 @@ const LeaveManagement = () => {
 
   const fetchApprovalAbstract = async () => {
     setApprovalSummaryLoading(true);
+    setApprovalSummaryError('');
     try {
       const response = await api.get('/api/admin/leave/approval-abstract', { params: approvalDateRange });
       if (response.data.success) {
-        setApprovalSummary(response.data.data || []);
+        setApprovalSummary(response.data.data);
+      } else {
+        throw new Error(response.data.message || 'Failed to fetch approval abstract');
       }
     } catch (error) {
       console.error('Error fetching leave approval abstract:', error);
-      toast.error(error.response?.data?.message || 'Failed to fetch approval abstract');
+      const message = error.response?.data?.message || error.message || 'Failed to fetch approval abstract';
+      setApprovalSummary(null);
+      setApprovalSummaryError(message);
+      toast.error(message);
     } finally {
       setApprovalSummaryLoading(false);
     }
@@ -990,319 +988,39 @@ const LeaveManagement = () => {
             <div className="p-4 sm:p-6">
               {approvalSummaryLoading ? (
                 <div className="py-12 text-center text-sm text-gray-500">Loading approval summary…</div>
+              ) : approvalSummaryError ? (
+                <div className="py-12 text-center text-sm text-red-600">{approvalSummaryError}</div>
               ) : (
-                <>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-                    <div className="rounded-lg bg-blue-50 p-3 text-center">
-                      <div className="text-xl font-bold text-blue-900">{approvalSummary.totals?.requests || 0}</div>
-                      <div className="text-xs text-blue-700">Total Requests</div>
-                    </div>
-                    <div className="rounded-lg bg-amber-50 p-3 text-center">
-                      <div className="text-xl font-bold text-amber-900">{approvalSummary.totals?.pending || 0}</div>
-                      <div className="text-xs text-amber-700">Pending</div>
-                    </div>
-                    <div className="rounded-lg bg-green-50 p-3 text-center">
-                      <div className="text-xl font-bold text-green-900">{approvalSummary.totals?.approved || 0}</div>
-                      <div className="text-xs text-green-700">Approved</div>
-                    </div>
-                    <div className="rounded-lg bg-red-50 p-3 text-center">
-                      <div className="text-xl font-bold text-red-900">{approvalSummary.totals?.rejected || 0}</div>
-                      <div className="text-xs text-red-700">Rejected</div>
-                    </div>
-                    <div className="rounded-lg bg-gray-100 p-3 text-center">
-                      <div className="text-xl font-bold text-gray-900">{approvalSummary.totals?.processed || 0}</div>
-                      <div className="text-xs text-gray-600">Total Processed</div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                    <div>
-                      <h3 className="text-base font-semibold text-gray-900">Request Abstract & Type Breakdown</h3>
-                      <p className="text-xs text-gray-500">
-                        Dates are displayed horizontally in columns. Click on any request type row to expand its pending, approved, and rejected breakdown across dates.
-                      </p>
-                    </div>
-                    {sortedDays.length > 0 && (
-                      <div className="flex items-center gap-2 self-start sm:self-auto">
-                        <button
-                          type="button"
-                          onClick={handleExpandAllTypes}
-                          className="px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200"
-                        >
-                          Expand All Types
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCollapseAllTypes}
-                          className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors border border-gray-200"
-                        >
-                          Collapse All Types
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm bg-white">
-                    <table className="min-w-full divide-y divide-gray-200 text-left border-collapse">
-                      <thead className="bg-gray-50 text-gray-700">
-                        <tr>
-                          <th className="sticky left-0 z-20 bg-gray-50 px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-700 border-r border-b border-gray-200 min-w-[200px] shadow-xs">
-                            Request Type
-                          </th>
-                          {sortedDays.map((day) => {
-                            const weekday = getWeekdayIndia(day.date);
-                            return (
-                              <th
-                                key={day.date}
-                                className="px-3 py-3 text-right font-semibold text-gray-700 bg-gray-50 border-r border-b border-gray-200 select-none min-w-[125px]"
-                              >
-                                <div className="flex flex-col items-end">
-                                  <span className="text-xs font-bold text-gray-900">{formatDateDash(day.date)}</span>
-                                  {weekday && <span className="text-[11px] text-gray-500 font-normal">({weekday})</span>}
-                                </div>
-                              </th>
-                            );
-                          })}
-                          <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-gray-800 bg-gray-100 border-l border-b border-gray-200 min-w-[110px]">
-                            Overall Total
-                          </th>
+                <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm bg-white">
+                  <table className="min-w-[980px] w-full border-collapse text-left">
+                    <thead className="bg-gray-50 text-gray-700">
+                      <tr>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">S.no</th>
+                        <th className="border border-gray-200 px-3 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          Date (For which the Leave request Raised)
+                        </th>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">Request Raised</th>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">Pending</th>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">Rejected</th>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">Approved by Warden with OTP</th>
+                        <th className="border border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider">Final Approved by Principal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {dailyApprovalRows.map((day, index) => (
+                        <tr key={day.date} className="hover:bg-gray-50">
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{index + 1}.</td>
+                          <td className="border border-gray-200 px-3 py-2 text-sm">{formatDateDash(day.date)}</td>
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{day.requests}</td>
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{day.pending}</td>
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{day.rejected}</td>
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{day.wardenApproved}</td>
+                          <td className="border border-gray-200 px-3 py-2 text-center text-sm">{day.principalApproved}</td>
                         </tr>
-                      </thead>
-
-                      <tbody className="divide-y divide-gray-100 bg-white">
-                        {[
-                          { key: 'Leave', label: 'Leave', color: 'bg-blue-600' },
-                          { key: 'Permission', label: 'Permission', color: 'bg-indigo-600' },
-                          { key: 'Stay in Hostel', label: 'Stay in Hostel', color: 'bg-emerald-600' }
-                        ].map((rt) => {
-                          const isExpanded = expandedTypes.has(rt.key);
-                          const overallItem = (approvalSummary.byType || []).find((t) => t.applicationType === rt.key) || {
-                            requests: 0,
-                            pending: 0,
-                            approved: 0,
-                            rejected: 0
-                          };
-
-                          return (
-                            <tr
-                              key={rt.key}
-                              onClick={() => toggleType(rt.key)}
-                              className={`cursor-pointer transition-colors duration-150 select-none ${
-                                isExpanded ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-gray-50'
-                              }`}
-                            >
-                              {/* Sticky Request Type Column - Clean, no status labels */}
-                              <td className="sticky left-0 z-10 bg-white px-4 py-3 text-sm font-semibold text-gray-900 border-r border-b border-gray-200 shadow-xs">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform ${
-                                      isExpanded ? 'rotate-90 text-blue-600 bg-blue-100' : 'text-gray-400 bg-gray-100'
-                                    }`}
-                                  >
-                                    <ChevronRightIcon className="w-3.5 h-3.5" />
-                                  </span>
-                                  <span className={`w-2.5 h-2.5 rounded-full ${rt.color}`} />
-                                  <span className="font-semibold text-gray-900">{rt.label}</span>
-                                </div>
-                              </td>
-
-                              {/* Date Columns - Pending, Approved, Rejected displayed directly in this date column */}
-                              {sortedDays.map((day) => {
-                                const data = (day.byType || []).find((t) => t.applicationType === rt.key) || {
-                                  requests: 0,
-                                  pending: 0,
-                                  approved: 0,
-                                  rejected: 0
-                                };
-
-                                return (
-                                  <td
-                                    key={day.date}
-                                    className={`px-3 py-3 border-r border-b border-gray-200 transition-colors ${
-                                      isExpanded ? 'bg-blue-50/20' : ''
-                                    }`}
-                                  >
-                                    {isExpanded ? (
-                                      <div className="flex flex-col gap-1 py-0.5 text-xs">
-                                        <div className="flex items-center justify-between gap-1.5 text-gray-700 font-semibold border-b border-gray-200 pb-0.5">
-                                          <span>Total:</span>
-                                          <span className="font-bold text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded">{data.requests}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-1.5 text-amber-800">
-                                          <span className="flex items-center gap-1 font-medium">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                            Pending:
-                                          </span>
-                                          <span className="font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">{data.pending}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-1.5 text-green-800">
-                                          <span className="flex items-center gap-1 font-medium">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                            Approved:
-                                          </span>
-                                          <span className="font-bold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{data.approved}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-1.5 text-red-800">
-                                          <span className="flex items-center gap-1 font-medium">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                            Rejected:
-                                          </span>
-                                          <span className="font-bold bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">{data.rejected}</span>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="text-right text-sm font-semibold text-gray-800">
-                                        {data.requests}
-                                      </div>
-                                    )}
-                                  </td>
-                                );
-                              })}
-
-                              {/* Overall Total Column */}
-                              <td
-                                className={`px-4 py-3 text-right text-sm font-bold text-gray-900 bg-gray-50/70 border-l border-b border-gray-200 ${
-                                  isExpanded ? 'bg-blue-50/30' : ''
-                                }`}
-                              >
-                                {isExpanded ? (
-                                  <div className="flex flex-col gap-1 py-0.5 text-xs">
-                                    <div className="flex items-center justify-between gap-1.5 text-gray-700 font-semibold border-b border-gray-200 pb-0.5">
-                                      <span>Total:</span>
-                                      <span className="font-bold text-gray-900 bg-gray-200 px-1.5 py-0.5 rounded">{overallItem.requests}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-amber-800">
-                                      <span className="font-medium">Pending:</span>
-                                      <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{overallItem.pending}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-green-800">
-                                      <span className="font-medium">Approved:</span>
-                                      <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{overallItem.approved}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-red-800">
-                                      <span className="font-medium">Rejected:</span>
-                                      <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{overallItem.rejected}</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div>{overallItem.requests}</div>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-
-                        {!sortedDays.length && (
-                          <tr>
-                            <td colSpan={2} className="px-4 py-8 text-center text-sm text-gray-500">
-                              No requests in this date range.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-
-                      {sortedDays.length > 0 && (
-                        <tfoot className="border-t-2 border-gray-300">
-                          {/* Total Requests Main Row */}
-                          <tr
-                            onClick={() => toggleType('total')}
-                            className="bg-gray-50 hover:bg-blue-50/30 cursor-pointer font-bold select-none transition-colors"
-                          >
-                            <td className="sticky left-0 z-10 bg-gray-100 px-4 py-3 text-sm font-bold text-gray-900 border-r border-gray-200 shadow-xs">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded transition-transform ${
-                                    expandedTypes.has('total') ? 'rotate-90 text-blue-600 bg-blue-100' : 'text-gray-400 bg-gray-100'
-                                  }`}
-                                >
-                                  <ChevronRightIcon className="w-3.5 h-3.5" />
-                                </span>
-                                <span>Total Requests</span>
-                              </div>
-                            </td>
-
-                            {/* Date columns breakdown for Total Requests */}
-                            {sortedDays.map((day) => (
-                              <td
-                                key={day.date}
-                                className={`px-3 py-3 border-r border-gray-200 transition-colors ${
-                                  expandedTypes.has('total') ? 'bg-blue-100/30' : 'bg-blue-50/50'
-                                }`}
-                              >
-                                {expandedTypes.has('total') ? (
-                                  <div className="flex flex-col gap-1 py-0.5 text-xs">
-                                    <div className="flex items-center justify-between gap-1.5 text-blue-900 font-bold border-b border-blue-200 pb-0.5">
-                                      <span>Total:</span>
-                                      <span className="font-bold text-blue-900 bg-blue-200 px-1.5 py-0.5 rounded">{day.requests}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-amber-800">
-                                      <span className="flex items-center gap-1 font-bold">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                        Pending:
-                                      </span>
-                                      <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{day.pending}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-green-800">
-                                      <span className="flex items-center gap-1 font-bold">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                        Approved:
-                                      </span>
-                                      <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{day.approved}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1.5 text-red-800">
-                                      <span className="flex items-center gap-1 font-bold">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                        Rejected:
-                                      </span>
-                                      <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{day.rejected}</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="text-right text-sm font-bold text-blue-900">
-                                    {day.requests}
-                                  </div>
-                                )}
-                              </td>
-                            ))}
-
-                            {/* Overall Total for Total Requests */}
-                            <td
-                              className={`px-4 py-3 text-right text-sm font-extrabold text-blue-950 bg-blue-100/80 border-l border-gray-200 ${
-                                expandedTypes.has('total') ? 'bg-blue-200/50' : ''
-                              }`}
-                            >
-                              {expandedTypes.has('total') ? (
-                                <div className="flex flex-col gap-1 py-0.5 text-xs">
-                                  <div className="flex items-center justify-between gap-1.5 text-blue-950 font-bold border-b border-blue-300 pb-0.5">
-                                    <span>Total:</span>
-                                    <span className="font-bold bg-blue-200 px-1.5 py-0.5 rounded">{approvalSummary.totals?.requests || 0}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between gap-1.5 text-amber-900">
-                                    <span className="font-bold">Pending:</span>
-                                    <span className="font-bold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.pending || 0}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between gap-1.5 text-green-900">
-                                    <span className="font-bold">Approved:</span>
-                                    <span className="font-bold bg-green-100 border border-green-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.approved || 0}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between gap-1.5 text-red-900">
-                                    <span className="font-bold">Rejected:</span>
-                                    <span className="font-bold bg-red-100 border border-red-300 px-1.5 py-0.5 rounded">{approvalSummary.totals?.rejected || 0}</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div>{approvalSummary.totals?.requests || 0}</div>
-                              )}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      )}
-                    </table>
-                  </div>
-                  {!approvalSummary.totals?.requests && !approvalSummary.totals?.processed && (
-                    <p className="mt-4 text-center text-sm text-gray-500">No requests were submitted or processed in this date range.</p>
-                  )}
-                </>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>

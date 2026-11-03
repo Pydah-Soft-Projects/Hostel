@@ -1080,15 +1080,9 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
       baseMatch.course = { $in: allowedCourses };
     }
 
-    const pendingStatuses = [
-      'Pending',
-      'Pending OTP Verification',
-      'Warden Verified',
-      'Warden Recommended',
-      'Pending Principal Approval'
-    ];
     const approvedStatuses = ['Approved', 'Principal Approved'];
     const rejectedStatuses = ['Rejected', 'Principal Rejected'];
+    const finalStatuses = [...approvedStatuses, ...rejectedStatuses];
 
     const counts = await Leave.aggregate([
       { $match: baseMatch },
@@ -1114,10 +1108,34 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
             applicationType: '$applicationType'
           },
           requests: { $sum: 1 },
-          pending: { $sum: { $cond: [{ $in: ['$status', pendingStatuses] }, 1, 0] } },
+          pending: { $sum: { $cond: [{ $not: [{ $in: ['$status', finalStatuses] }] }, 1, 0] } },
           approved: { $sum: { $cond: [{ $in: ['$status', approvedStatuses] }, 1, 0] } },
           rejected: { $sum: { $cond: [{ $in: ['$status', rejectedStatuses] }, 1, 0] } },
-          processed: { $sum: { $cond: [{ $in: ['$status', [...approvedStatuses, ...rejectedStatuses]] }, 1, 0] } }
+          processed: { $sum: { $cond: [{ $in: ['$status', finalStatuses] }, 1, 0] } },
+          wardenApproved: {
+            $sum: {
+              $cond: [{ $ne: [{ $ifNull: ['$verifiedBy', null] }, null] }, 1, 0]
+            }
+          },
+          principalApproved: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: ['$status', 'Principal Approved'] },
+                    {
+                      $and: [
+                        { $eq: ['$status', 'Approved'] },
+                        { $ne: ['$applicationType', 'Stay in Hostel'] }
+                      ]
+                    }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
         }
       }
     ]);
@@ -1130,7 +1148,9 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
       pending: 0,
       processed: 0,
       approved: 0,
-      rejected: 0
+      rejected: 0,
+      wardenApproved: 0,
+      principalApproved: 0
     }]));
 
     const getDay = date => {
@@ -1142,13 +1162,17 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
           processed: 0,
           approved: 0,
           rejected: 0,
+          wardenApproved: 0,
+          principalApproved: 0,
           byType: new Map(typeNames.map(type => [type, {
             applicationType: type,
             requests: 0,
             pending: 0,
             processed: 0,
             approved: 0,
-            rejected: 0
+            rejected: 0,
+            wardenApproved: 0,
+            principalApproved: 0
           }]))
         });
       }
@@ -1167,6 +1191,8 @@ export const getLeaveApprovalAbstract = async (req, res, next) => {
         target.processed += item.processed || 0;
         target.approved += item.approved || 0;
         target.rejected += item.rejected || 0;
+        target.wardenApproved += item.wardenApproved || 0;
+        target.principalApproved += item.principalApproved || 0;
       });
     });
 
