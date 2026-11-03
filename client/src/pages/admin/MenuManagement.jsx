@@ -2,6 +2,102 @@ import React, { useEffect, useState, useRef } from 'react';
 import api from '../../utils/axios';
 import { toast } from 'react-hot-toast';
 
+// Standard predefined cafeteria menu items with photos for supervisor dropdown
+const STANDARD_MENU_ITEMS = {
+  breakfast: [
+    { name: 'Idly', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Plain Dosa', imageUrl: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Masala Dosa', imageUrl: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Onion Gari (Vada)', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Mysore Bonda', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Onion Bonda', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Uttapam', imageUrl: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Pesarattu', imageUrl: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Poori Masala', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Main Tiffin' },
+    { name: 'Rava Upma', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Upma & Rice' },
+    { name: 'Vegetable Semiya Upma', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Upma & Rice' },
+    { name: 'Bansi Ravva Upma', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Upma & Rice' },
+    { name: 'Pongal', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Upma & Rice' },
+    { name: 'Tomato Bath', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Upma & Rice' },
+    { name: 'Coconut Chutney', imageUrl: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?auto=format&fit=crop&w=400&q=80', category: 'Chutneys & Accompaniments' },
+    { name: 'Tomato Chutney', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Chutneys & Accompaniments' },
+    { name: 'Ginger Chutney', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Chutneys & Accompaniments' },
+    { name: 'Gulla Pappu Chutney', imageUrl: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?auto=format&fit=crop&w=400&q=80', category: 'Chutneys & Accompaniments' },
+    { name: 'Sambar', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Chutneys & Accompaniments' },
+    { name: 'Tea / Coffee', imageUrl: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80', category: 'Beverages' }
+  ],
+  lunch: [
+    { name: 'White Rice', imageUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=400&q=80', category: 'Rice & Staples' },
+    { name: 'Veg Biryani', imageUrl: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=400&q=80', category: 'Rice & Staples' },
+    { name: 'Sambar', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Tomato Rasam', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Thota Kura Pappu', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Tomato Pappu', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Gongura Pappu', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Anapakaya Pappu', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Soups' },
+    { name: 'Potato Fry (Alu Fry)', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Potato 65', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Potato Curry', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Dondakaya Fry (Ivy Gourd)', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Bendakaya Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Cabbage Fry', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Vankaya Curry (Brinjal)', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Aritikaya Popu (Raw Banana)', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Paneer Batani Curry', imageUrl: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Chicken Curry', imageUrl: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80', category: 'Non-Veg' },
+    { name: 'Chicken Semi Gravy', imageUrl: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80', category: 'Non-Veg' },
+    { name: 'Curd', imageUrl: 'https://images.unsplash.com/photo-1571212515416-fef01fc43637?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' },
+    { name: 'Gongura Pacchadi', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' },
+    { name: 'Dosa Avakaya Pacchadi', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' },
+    { name: 'Papad / Appalam', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' }
+  ],
+  snacks: [
+    { name: 'Samosa', imageUrl: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Veg Puffs', imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Egg Puffs', imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Onion Pakodi (Gatti Pakodi)', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Challa Punukulu', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Veg Noodles', imageUrl: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80', category: 'Hot Snacks' },
+    { name: 'Sweet Corn', imageUrl: 'https://images.unsplash.com/photo-1551754655-cd27e38d2076?auto=format&fit=crop&w=400&q=80', category: 'Healthy Snacks' },
+    { name: 'Boiled Palli (Peanuts)', imageUrl: 'https://images.unsplash.com/photo-1567894340315-735d7c361db0?auto=format&fit=crop&w=400&q=80', category: 'Healthy Snacks' },
+    { name: 'Biscuits & Cookies', imageUrl: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=400&q=80', category: 'Packaged & Sweets' },
+    { name: 'Boondi Mixture', imageUrl: 'https://images.unsplash.com/photo-1606491956689-2ea866880c84?auto=format&fit=crop&w=400&q=80', category: 'Packaged & Sweets' },
+    { name: 'Dil Pasandh', imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80', category: 'Packaged & Sweets' },
+    { name: 'Banana / Fresh Fruit', imageUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=400&q=80', category: 'Healthy Snacks' },
+    { name: 'Tea (Chai)', imageUrl: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80', category: 'Beverages' },
+    { name: 'Coffee', imageUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=400&q=80', category: 'Beverages' },
+    { name: 'Fruit Juice / Cool Drink', imageUrl: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80', category: 'Beverages' }
+  ],
+  dinner: [
+    { name: 'White Rice', imageUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=400&q=80', category: 'Rice & Roti' },
+    { name: 'Chapati / Roti', imageUrl: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?auto=format&fit=crop&w=400&q=80', category: 'Rice & Roti' },
+    { name: 'Veg Fried Rice', imageUrl: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=400&q=80', category: 'Rice & Roti' },
+    { name: 'Egg Fried Rice', imageUrl: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=400&q=80', category: 'Rice & Roti' },
+    { name: 'Veg Biryani / Pulihora', imageUrl: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=400&q=80', category: 'Rice & Roti' },
+    { name: 'Talimpu Pappu', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Rasam' },
+    { name: 'Pappu Charu / Rasam', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Dal & Rasam' },
+    { name: 'Curd', imageUrl: 'https://images.unsplash.com/photo-1571212515416-fef01fc43637?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' },
+    { name: 'Egg Curry', imageUrl: 'https://images.unsplash.com/photo-1596797038530-2c107229654b?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Eggs Ukkuru (Bhurji)', imageUrl: 'https://images.unsplash.com/photo-1596797038530-2c107229654b?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Chicken Curry', imageUrl: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Paneer Capsicum Curry', imageUrl: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Fish Fry', imageUrl: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Fish Pulusu', imageUrl: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Potato Kurma / Aloo Curry', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Meal Maker Kurma (Soya)', imageUrl: 'https://images.unsplash.com/photo-1546833998-877b37c2e5c6?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Bendakaya Fry', imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Sweet Semiya (Payasam)', imageUrl: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?auto=format&fit=crop&w=400&q=80', category: 'Desserts' },
+    { name: 'Kesari Sweet', imageUrl: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?auto=format&fit=crop&w=400&q=80', category: 'Desserts' }
+  ]
+};
+
+const MEAL_CATEGORY_LABELS = {
+  breakfast: 'Tiffins (Breakfast)',
+  lunch: 'Lunch',
+  snacks: 'Snacks',
+  dinner: 'Dinner'
+};
+
 // Add CSS for line-clamp utility
 const lineClampStyle = `
   .line-clamp-2 {
@@ -103,6 +199,8 @@ const MenuManagement = () => {
   const [modalEditMenu, setModalEditMenu] = useState({ breakfast: [], lunch: [], dinner: [] });
   const [modalAddInputs, setModalAddInputs] = useState({});
   const [modalAddImages, setModalAddImages] = useState({});
+  const [modalSelectedStandardImage, setModalSelectedStandardImage] = useState({});
+  const [modalStandardDropdownValue, setModalStandardDropdownValue] = useState({});
   const [modalDeletedImages, setModalDeletedImages] = useState([]);
   const [savingToday, setSavingToday] = useState(false);
   const [selectedMealType, setSelectedMealType] = useState('breakfast');
@@ -501,6 +599,8 @@ const MenuManagement = () => {
     setModalEditMenu(initialMeals);
     setModalAddInputs({});
     setModalAddImages({});
+    setModalSelectedStandardImage({});
+    setModalStandardDropdownValue({});
     setModalDeletedImages([]); // Reset deleted images array
     setSelectedMealType('breakfast');
     setShowTodayModal(true);
@@ -510,6 +610,22 @@ const MenuManagement = () => {
   };
   const handleModalAddInputChange = (meal, value) => {
     setModalAddInputs(prev => ({ ...prev, [meal]: value }));
+  };
+
+  const handleSelectStandardItem = (meal, itemName) => {
+    if (!itemName) {
+      setModalStandardDropdownValue(prev => ({ ...prev, [meal]: '' }));
+      setModalSelectedStandardImage(prev => ({ ...prev, [meal]: null }));
+      return;
+    }
+    const catalog = STANDARD_MENU_ITEMS[meal] || [];
+    const matched = catalog.find(item => item.name === itemName);
+    if (matched) {
+      setModalStandardDropdownValue(prev => ({ ...prev, [meal]: matched.name }));
+      setModalAddInputs(prev => ({ ...prev, [meal]: matched.name }));
+      setModalSelectedStandardImage(prev => ({ ...prev, [meal]: matched.imageUrl }));
+      setModalAddImages(prev => ({ ...prev, [meal]: null }));
+    }
   };
 
   const handleModalImageChange = (meal, file) => {
@@ -527,12 +643,14 @@ const MenuManagement = () => {
     setModalAddImages(prev => ({ ...prev, [meal]: file }));
 
     if (file) {
+      // Clear standard image if manual file is chosen
+      setModalSelectedStandardImage(prev => ({ ...prev, [meal]: null }));
       toast.success(`Image selected for ${meal}: ${file.name}`);
     }
   };
 
-  const handleModalAddItem = (meal) => {
-    const value = (modalAddInputs[meal] || '').trim();
+  const handleModalAddItem = (meal, itemToAdd = null) => {
+    const value = (itemToAdd?.name || modalAddInputs[meal] || '').trim();
     if (!value) return;
 
     // Check for duplicates in current state
@@ -541,16 +659,18 @@ const MenuManagement = () => {
     const normalizedItems = currentItems.map(item => (item.name || item).toLowerCase());
 
     if (normalizedItems.includes(normalizedValue)) {
-      toast.error('Item already exists');
+      toast.error('Item already exists in menu');
       return;
     }
 
-    const newItem = { name: value, imageUrl: null };
+    const standardImg = itemToAdd?.imageUrl || modalSelectedStandardImage[meal] || null;
+    const newItem = { name: value, imageUrl: standardImg };
     const imageFile = modalAddImages[meal];
 
     if (imageFile) {
       // Store the file directly, not in FormData
       newItem.imageFile = imageFile;
+      newItem.imageUrl = null;
     }
 
     setModalEditMenu(prev => {
@@ -563,6 +683,9 @@ const MenuManagement = () => {
     });
     setModalAddInputs(prev => ({ ...prev, [meal]: '' }));
     setModalAddImages(prev => ({ ...prev, [meal]: null }));
+    setModalSelectedStandardImage(prev => ({ ...prev, [meal]: null }));
+    setModalStandardDropdownValue(prev => ({ ...prev, [meal]: '' }));
+    toast.success(`Added ${value}`);
   };
   const handleModalRemoveItem = (meal, idx) => {
     setModalEditMenu(prev => {
@@ -1418,7 +1541,11 @@ const MenuManagement = () => {
               {['breakfast', 'lunch', 'snacks', 'dinner'].map(meal => (
                 <button
                   key={meal}
-                  onClick={() => setSelectedMealType(meal)}
+                  onClick={() => {
+                    setSelectedMealType(meal);
+                    setModalStandardDropdownValue(prev => ({ ...prev, [meal]: '' }));
+                    setModalSelectedStandardImage(prev => ({ ...prev, [meal]: null }));
+                  }}
                   className={`flex-1 px-2 py-2 text-xs font-medium transition-colors ${selectedMealType === meal
                     ? 'bg-white text-blue-600 border-b-2 border-blue-600'
                     : 'text-gray-600 hover:text-gray-800'
@@ -1432,7 +1559,7 @@ const MenuManagement = () => {
                       {meal === 'snacks' && '🍿'}
                       {meal === 'dinner' && '🍽️'}
                     </span>
-                    <span className="capitalize">{meal}</span>
+                    <span className="capitalize">{meal === 'breakfast' ? 'Tiffins' : meal}</span>
                   </div>
                 </button>
               ))}
@@ -1446,12 +1573,12 @@ const MenuManagement = () => {
                 <div className="space-y-2 max-h-32 overflow-y-auto">
                   {modalEditMenu[selectedMealType]?.map((item, idx) => (
                     <div key={idx} className="flex items-center justify-between bg-gray-50 rounded-lg p-2 border border-gray-200">
-                      <div className="flex items-center gap-2 flex-1">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
                         {item.imageUrl && (
                           <img
                             src={item.imageUrl}
                             alt={item.name || item}
-                            className="w-8 h-8 object-cover rounded border border-gray-200"
+                            className="w-8 h-8 object-cover rounded border border-gray-200 flex-shrink-0"
                             onError={(e) => {
                               e.target.style.display = 'none';
                             }}
@@ -1465,7 +1592,7 @@ const MenuManagement = () => {
                       <button
                         onClick={() => handleModalRemoveItem(selectedMealType, idx)}
                         disabled={savingToday}
-                        className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors"
+                        className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors flex-shrink-0"
                         title="Delete item"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1482,97 +1609,198 @@ const MenuManagement = () => {
                 </div>
               </div>
 
-              {/* Add Item Form */}
-              <div className="bg-white rounded-lg border border-gray-200 p-3">
-                <h5 className="text-xs font-medium text-gray-700 mb-3">Add New Item</h5>
-                <form
-                  onSubmit={e => {
-                    e.preventDefault();
-                    handleModalAddItem(selectedMealType);
-                  }}
-                  className="space-y-3"
-                >
-                  {/* Item Name Input */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Item Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={`Enter ${selectedMealType} item name`}
-                      value={modalAddInputs[selectedMealType] || ''}
-                      onChange={e => handleModalAddInputChange(selectedMealType, e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              {/* Add Item Form with Standard Items Dropdown */}
+              <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h5 className="text-xs font-bold text-gray-800">
+                    Add {selectedMealType === 'breakfast' ? 'Tiffins' : selectedMealType.charAt(0).toUpperCase() + selectedMealType.slice(1)} Item
+                  </h5>
+                  <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-medium">
+                    Standard Photos Available
+                  </span>
+                </div>
+
+                {/* Standard Items Dropdown */}
+                <div className="bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-200 rounded-lg p-3">
+                  <label className="block text-xs font-semibold text-blue-900 mb-1">
+                    Select Standard Item (With Photo)
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={modalStandardDropdownValue[selectedMealType] || ''}
+                      onChange={e => handleSelectStandardItem(selectedMealType, e.target.value)}
+                      className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-xs sm:text-sm bg-white font-medium text-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer shadow-sm"
                       disabled={savingToday}
-                    />
+                    >
+                      <option value="">-- Choose standard item ({selectedMealType === 'breakfast' ? 'Tiffins' : selectedMealType}) --</option>
+                      {(STANDARD_MENU_ITEMS[selectedMealType] || []).map((stdItem, idx) => (
+                        <option key={idx} value={stdItem.name}>
+                          {stdItem.name} — {stdItem.category}
+                        </option>
+                      ))}
+                    </select>
+                    {modalStandardDropdownValue[selectedMealType] && (
+                      <button
+                        type="button"
+                        onClick={() => handleModalAddItem(selectedMealType)}
+                        disabled={savingToday}
+                        className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm flex items-center gap-1 flex-shrink-0"
+                        title="Add this standard item to today's menu"
+                      >
+                        + Add
+                      </button>
+                    )}
                   </div>
 
-                  {/* Image Upload */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Item Image (Optional)
-                    </label>
-                    <div className="relative">
+                  {/* Standard Photo Auto-Selected Preview */}
+                  {modalSelectedStandardImage[selectedMealType] && (
+                    <div className="mt-2.5 flex items-center justify-between p-2 bg-white rounded-lg border border-blue-200 shadow-xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src={modalSelectedStandardImage[selectedMealType]}
+                          alt={modalAddInputs[selectedMealType] || 'Item'}
+                          className="w-10 h-10 rounded-md object-cover border border-blue-200 shadow-xs flex-shrink-0"
+                          crossOrigin="anonymous"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-gray-900 truncate">
+                            {modalAddInputs[selectedMealType]}
+                          </div>
+                          <div className="text-[11px] text-green-600 font-medium flex items-center gap-1">
+                            <span>✓</span> Standard photo ready (no upload needed)
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalStandardDropdownValue(prev => ({ ...prev, [selectedMealType]: '' }));
+                          setModalSelectedStandardImage(prev => ({ ...prev, [selectedMealType]: null }));
+                        }}
+                        className="text-xs text-gray-400 hover:text-red-500 px-1"
+                        title="Clear selection"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Quick-Pick Popular Chips */}
+                  <div className="mt-2.5">
+                    <div className="text-[11px] font-medium text-blue-900/80 mb-1.5">
+                      Quick Pick:
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(STANDARD_MENU_ITEMS[selectedMealType] || []).slice(0, 8).map((stdItem, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleModalAddItem(selectedMealType, stdItem)}
+                          disabled={savingToday}
+                          className="px-2 py-1 text-[11px] bg-white hover:bg-blue-600 hover:text-white text-gray-700 rounded border border-blue-200 hover:border-blue-600 transition-all font-medium flex items-center gap-1 shadow-xs"
+                          title={`Click to add ${stdItem.name} directly`}
+                        >
+                          <span className="text-blue-500 hover:text-white font-bold">+</span>
+                          <span>{stdItem.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom Item or Upload Custom Image (Collapsible / Secondary) */}
+                <details className="text-xs text-gray-600 bg-gray-50 rounded-lg border border-gray-200 p-2.5 group">
+                  <summary className="font-semibold text-gray-700 cursor-pointer flex items-center justify-between select-none">
+                    <span>Or enter custom item name / upload photo</span>
+                    <span className="text-gray-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      handleModalAddItem(selectedMealType);
+                    }}
+                    className="space-y-3 mt-3 pt-2 border-t border-gray-200"
+                  >
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Item Name
+                      </label>
                       <input
-                        type="file"
-                        accept="image/*"
-                        onChange={e => handleModalImageChange(selectedMealType, e.target.files[0])}
-                        className="hidden"
-                        id={`image-upload-${selectedMealType}`}
+                        type="text"
+                        placeholder={`Enter ${selectedMealType === 'breakfast' ? 'tiffin' : selectedMealType} item name`}
+                        value={modalAddInputs[selectedMealType] || ''}
+                        onChange={e => handleModalAddInputChange(selectedMealType, e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         disabled={savingToday}
                       />
-                      <label
-                        htmlFor={`image-upload-${selectedMealType}`}
-                        className="flex items-center justify-center w-full px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50"
-                      >
-                        <div className="text-center">
-                          {modalAddImages[selectedMealType] ? (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                              </svg>
-                              <span className="text-xs text-green-600 font-medium">{modalAddImages[selectedMealType].name}</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                              </svg>
-                              <span className="text-xs text-gray-500">Tap to upload image</span>
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                      {modalAddImages[selectedMealType] && (
-                        <button
-                          type="button"
-                          onClick={() => setModalAddImages(prev => ({ ...prev, [selectedMealType]: null }))}
-                          className="absolute top-1 right-1 text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50"
-                          disabled={savingToday}
-                        >
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                      )}
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Max 5MB, JPG, PNG, GIF supported
-                    </p>
-                  </div>
 
-                  {/* Add Button */}
-                  <button
-                    type="submit"
-                    className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    disabled={savingToday || !modalAddInputs[selectedMealType]?.trim()}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                    Add Item
-                  </button>
-                </form>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Custom Image Upload (Optional)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e => handleModalImageChange(selectedMealType, e.target.files[0])}
+                          className="hidden"
+                          id={`image-upload-${selectedMealType}`}
+                          disabled={savingToday}
+                        />
+                        <label
+                          htmlFor={`image-upload-${selectedMealType}`}
+                          className="flex items-center justify-center w-full px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors bg-white disabled:opacity-50"
+                        >
+                          <div className="text-center">
+                            {modalAddImages[selectedMealType] ? (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                </svg>
+                                <span className="text-xs text-green-600 font-medium">{modalAddImages[selectedMealType].name}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                </svg>
+                                <span className="text-xs text-gray-500">Tap to upload custom image file</span>
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                        {modalAddImages[selectedMealType] && (
+                          <button
+                            type="button"
+                            onClick={() => setModalAddImages(prev => ({ ...prev, [selectedMealType]: null }))}
+                            className="absolute top-1 right-1 text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50"
+                            disabled={savingToday}
+                          >
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Max 5MB (JPG, PNG, GIF)
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      disabled={savingToday || !modalAddInputs[selectedMealType]?.trim()}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Add Custom Item
+                    </button>
+                  </form>
+                </details>
               </div>
             </div>
 
