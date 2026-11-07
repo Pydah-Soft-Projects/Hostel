@@ -375,12 +375,12 @@ const Home = () => {
               className="mb-8"
             >
               <h1 className="font-display text-5xl md:text-6xl font-bold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-200 to-cyan-200 leading-[1.15]">
-                {getInstitutionName().toUpperCase()}
+                CAMPO
                 <br />
-                <span>Hostel Connectify</span>
+                <span>Hostel</span>
               </h1>
               <p className="text-xl md:text-2xl mb-10 font-light text-cyan-100 max-w-2xl mx-auto leading-relaxed">
-                Transforming {getInstitutionName().toLowerCase()} communication with a modern, transparent, and efficient digital platform.
+                Transforming campo communication with a modern, transparent, and efficient digital platform.
               </p>
             </motion.div>
 
@@ -634,7 +634,7 @@ const Home = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-12 md:gap-8">
             <div className="col-span-1 md:col-span-2">
               <h3 className="font-display text-2xl font-bold text-deepsea-900 mb-4">
-                Pydah HOSTEL
+                Campo HOSTEL
                 <br />
                 Digital
               </h3>
@@ -646,12 +646,12 @@ const Home = () => {
               <h4 className="font-display font-bold text-lg text-deepsea-900 mb-4">Quick Links</h4>
               <ul className="space-y-2">
                 <li>
-                  <button onClick={() => navigate('/login')} className="text-gray-600 hover:text-primary-600">
+                  <button onClick={() => navigate('/login')} className="text-gray-600 hover:text-deepsea-600">
                     Get Started
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => navigate('/about')} className="text-gray-600 hover:text-primary-600">
+                  <button onClick={() => navigate('/about')} className="text-gray-600 hover:text-deepsea-600">
                     About Us
                   </button>
                 </li>
@@ -661,13 +661,13 @@ const Home = () => {
               <h4 className="font-display font-bold text-lg text-deepsea-900 mb-4">Support</h4>
               <ul className="space-y-2">
                 <li>
-                  <a href="#" className="text-gray-600 hover:text-primary-600">Help Center</a>
+                  <a href="#" className="text-gray-600 hover:text-deepsea-600">Help Center</a>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-600 hover:text-primary-600">FAQs</a>
+                  <a href="#" className="text-gray-600 hover:text-deepsea-600">FAQs</a>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-600 hover:text-primary-600">Contact Us</a>
+                  <a href="#" className="text-gray-600 hover:text-deepsea-600">Contact Us</a>
                 </li>
               </ul>
             </div>

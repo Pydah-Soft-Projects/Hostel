@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --primary: #167B72;
+  --primary-hover: #11625A;
+  --primary-light: #E6F3F1;
+  --primary-rgb: 22, 123, 114;
+  --primary-50: #EBF7F5;
+  --primary-100: #D6EFEA;
+  --primary-200: #B0E0D7;
+  --primary-300: #7AC7BA;
+  --primary-400: #3EA698;
+  --primary-500: #167B72;
+  --primary-600: #11625A;
+  --primary-700: #0E4E48;
+  --primary-800: #0C3C37;
+  --primary-900: #092B28;
+  --secondary: #E86A58;
+  --accent: #E86A58;
+  --background: #F4FAF8;
+  --surface: #FFFFFF;
+  --sidebar: #183E3B;
+  --sidebar-text: #EBF7F5;
+  --sidebar-muted: #8DB5AE;
+  --navbar: #FFFFFF;
+  --border: #DCEBE7;
+  --border-strong: #A8CEC6;
+  --text-primary: #142825;
+  --text-secondary: #486863;
+  --text-muted: #7E9D97;
+  --success: #1E824C;
+  --warning: #D9822B;
+  --danger: #D13438;
+  --info: #2B78C5;
+}
+
 /* Custom scrollbar styles */
 @layer utilities {
   .scrollbar-visible {
@@ -27,7 +61,30 @@
     background: #94a3b8;
   }
 
-  /* Student dashboard scrollbar - matches blue-900/blue-800 background */
+  /* Dedicated theme sidebar scrollbar */
+  .scrollbar-sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+  }
+
+  /* Student dashboard scrollbar */
   .scrollbar-visible-blue {
     scrollbar-width: thin;
     scrollbar-color: #1e3a8a #1e40af;
@@ -54,19 +111,19 @@
 
 @layer components {
   .btn-primary {
-    @apply px-4 py-2 bg-gradient-to-r from-blue-800 to-cyan-700 text-white rounded-lg shadow hover:from-blue-900 hover:to-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 transition-all duration-200;
+    @apply px-4 py-2 bg-primary text-white rounded-lg shadow hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all duration-200;
   }
   
   .btn-secondary {
-    @apply px-4 py-2 bg-white text-blue-900 border border-blue-200 rounded-lg shadow hover:bg-cyan-50 hover:text-cyan-900 focus:outline-none focus:ring-2 focus:ring-cyan-200 focus:ring-offset-2 transition-all duration-200;
+    @apply px-4 py-2 bg-surface text-primary border border-border rounded-lg shadow hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all duration-200;
   }
 
   .input-field {
-    @apply w-full px-3 py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:border-blue-400 bg-white shadow-sm transition-all duration-200;
+    @apply w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface shadow-sm transition-all duration-200 text-main;
   }
 
   .card {
-    @apply bg-white rounded-2xl shadow-lg p-8 border-t-4 border-blue-800;
+    @apply bg-surface rounded-2xl shadow-lg p-8 border-t-4 border-primary;
   }
 }
 
@@ -82,4 +139,13 @@
 
 .animate-scroll-left {
   animation: scroll-left 3s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
 } 

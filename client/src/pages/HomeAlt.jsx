@@ -123,8 +123,7 @@ const HomeAlt = () => {
         {/* Left: Text */}
         <div className="flex-1 max-w-xl text-left z-10 mb-10 md:mb-0">
           <h1 className="font-display text-4xl sm:text-5xl md:text-7xl font-bold mb-6 text-white leading-[1.1]">
-            HOSTEL<br />
-            CONNECTIFY
+            HOSTEL
           </h1>
           <p className="text-lg sm:text-xl md:text-2xl mb-8 sm:mb-10 font-light text-blue-100 max-w-2xl leading-relaxed">
             Transforming hostel communication with a modern, transparent, and efficient digital platform.

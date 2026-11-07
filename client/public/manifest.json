@@ -72,22 +72,6 @@
       "purpose": "maskable any"
     }
   ],
-  "screenshots": [
-    {
-      "src": "/images/screenshot-wide.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Pydah Hostel Management System Dashboard"
-    },
-    {
-      "src": "/images/screenshot-narrow.png",
-      "sizes": "750x1334",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Pydah Hostel Mobile Interface"
-    }
-  ],
   "shortcuts": [
     {
       "name": "Student Dashboard",
@@ -96,7 +80,7 @@
       "url": "/student/dashboard",
       "icons": [
         {
-          "src": "/icon-192x192.png",
+          "src": "/images/icon-192x192.png",
           "sizes": "192x192"
         }
       ]
@@ -108,7 +92,7 @@
       "url": "/student/leave",
       "icons": [
         {
-          "src": "/icon-192x192.png",
+          "src": "/images/icon-192x192.png",
           "sizes": "192x192"
         }
       ]
@@ -120,7 +104,7 @@
       "url": "/student/complaints",
       "icons": [
         {
-          "src": "/icon-192x192.png",
+          "src": "/images/icon-192x192.png",
           "sizes": "192x192"
         }
       ]

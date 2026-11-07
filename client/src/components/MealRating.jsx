@@ -29,7 +29,7 @@ const MealRating = ({ mealType, date, onRatingSubmit, hasItems = true }) => {
     breakfast: 'bg-green-50 border-green-200',
     lunch: 'bg-yellow-50 border-yellow-200',
     snacks: 'bg-purple-50 border-purple-200',
-    dinner: 'bg-blue-50 border-blue-200'
+    dinner: 'bg-primary-light border-border'
   };
 
   useEffect(() => {
@@ -133,12 +133,12 @@ const MealRating = ({ mealType, date, onRatingSubmit, hasItems = true }) => {
           value={comment}
           onChange={handleCommentChange}
           placeholder={`Share your thoughts about ${mealType}...`}
-          className="w-full p-2 border border-gray-300 rounded-lg text-xs resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="w-full p-2 border border-border rounded-lg text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-main"
           rows="2"
           maxLength="200"
           disabled={loading}
         />
-        <div className="text-xs text-gray-500 text-right mt-1">
+        <div className="text-xs text-text-muted text-right mt-1">
           {comment.length}/200
         </div>
       </div>
@@ -150,7 +150,7 @@ const MealRating = ({ mealType, date, onRatingSubmit, hasItems = true }) => {
         className={`w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors touch-manipulation ${
           loading || rating === 0
             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-            : 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800'
+            : 'bg-primary text-white hover:bg-primary-hover active:bg-primary-hover'
         }`}
       >
         {loading ? 'Submitting...' : userRating ? 'Update Rating' : 'Submit Rating'}

@@ -1,21 +1,23 @@
-const CACHE_NAME = 'pydah-hostel-v1';
+const CACHE_NAME = 'pydah-hostel-v2';
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/static/js/bundle.js',
-  '/static/css/main.css',
   '/images/icon-192x192.png',
   '/images/icon-512x512.png'
 ];
 
-// Install event - cache resources
+// Install event - cache resources safely
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
+      .then(async cache => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        await Promise.allSettled(
+          urlsToCache.map(url => cache.add(url).catch(err => {
+            console.warn('ServiceWorker: skipped resource', url, err);
+          }))
+        );
       })
   );
 });

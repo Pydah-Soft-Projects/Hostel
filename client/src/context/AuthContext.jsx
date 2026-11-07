@@ -198,10 +198,10 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      // This flag was causing the validation to be skipped on fresh logins.
-      // We will now validate every time the token is set.
       if (skipValidation) {
         setSkipValidation(false);
+        setLoading(false);
+        return;
       }
 
       try {
@@ -374,6 +374,11 @@ export const AuthProvider = ({ children }) => {
 
         // Set skip validation BEFORE setting token to prevent immediate validation
         setSkipValidation(true);
+        validationCacheRef.current = {
+          timestamp: Date.now(),
+          user: admin,
+          token: newToken
+        };
 
         // Set user state immediately
         setToken(newToken);
@@ -401,6 +406,11 @@ export const AuthProvider = ({ children }) => {
           console.log('AuthContext: Student data stored:', { tokenStored, userStored, roleStored });
 
           setSkipValidation(true);
+          validationCacheRef.current = {
+            timestamp: Date.now(),
+            user: studentUser,
+            token: newToken
+          };
           setToken(newToken);
           setUser(studentUser);
           api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;

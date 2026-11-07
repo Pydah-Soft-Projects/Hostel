@@ -60,7 +60,7 @@ const LogoutConfirmModal = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
           transition={{ type: 'spring', duration: 0.25, bounce: 0.1 }}
-          className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-10"
+          className="relative w-full max-w-md bg-surface rounded-2xl shadow-2xl border border-border overflow-hidden z-10"
           role="dialog"
           aria-modal="true"
           aria-labelledby="logout-modal-title"
@@ -70,7 +70,7 @@ const LogoutConfirmModal = ({
             type="button"
             disabled={loading}
             onClick={onClose}
-            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
+            className="absolute top-4 right-4 text-text-muted hover:text-text-main p-1.5 rounded-lg hover:bg-background transition-colors focus:outline-none disabled:opacity-50"
             aria-label="Close"
           >
             <XMarkIcon className="w-5 h-5" />
@@ -79,14 +79,14 @@ const LogoutConfirmModal = ({
           <div className="p-6">
             {/* Header Icon & Title */}
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0 ring-4 ring-red-50/60">
+              <div className="w-12 h-12 rounded-xl bg-danger/10 text-danger flex items-center justify-center flex-shrink-0 ring-4 ring-danger/20">
                 <ArrowRightOnRectangleIcon className="w-6 h-6" />
               </div>
               <div>
-                <h3 id="logout-modal-title" className="text-lg font-semibold text-slate-900 leading-snug">
+                <h3 id="logout-modal-title" className="text-lg font-semibold text-text-main leading-snug">
                   Confirm Logout
                 </h3>
-                <p className="mt-1 text-sm text-slate-600">
+                <p className="mt-1 text-sm text-text-sub">
                   Are you sure you want to log out of your session?
                 </p>
               </div>
@@ -94,17 +94,17 @@ const LogoutConfirmModal = ({
 
             {/* SSO-specific notice */}
             {isSSO && (
-              <div className="mt-4 p-3.5 bg-blue-50/80 border border-blue-200/70 rounded-xl text-left">
-                <div className="flex items-center gap-2 text-blue-800 font-medium text-xs sm:text-sm">
-                  <ShieldCheckIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <div className="mt-4 p-3.5 bg-primary-light/40 border border-border rounded-xl text-left">
+                <div className="flex items-center gap-2 text-primary font-medium text-xs sm:text-sm">
+                  <ShieldCheckIcon className="w-4 h-4 text-primary flex-shrink-0" />
                   <span>SSO Active Session</span>
                 </div>
-                <p className="mt-1 text-xs text-blue-700 leading-relaxed">
+                <p className="mt-1 text-xs text-text-sub leading-relaxed">
                   You logged in via Single Sign-On. Logging out will end your session and redirect you back to the CRM portal:
                 </p>
-                <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-blue-200 rounded-lg text-xs font-medium text-blue-900 max-w-full truncate">
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-surface border border-border rounded-lg text-xs font-medium text-primary max-w-full truncate">
                   <span className="truncate">{crmUrl}</span>
-                  <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                  <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                 </div>
               </div>
             )}

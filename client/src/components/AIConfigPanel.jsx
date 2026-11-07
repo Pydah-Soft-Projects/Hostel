@@ -134,33 +134,33 @@ const AIConfigPanel = ({ onClose }) => {
         className="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <CogIcon className="w-6 h-6 text-blue-600" />
+            <div className="p-2 bg-primary-light rounded-lg">
+              <CogIcon className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">AI-Powered Complaint Routing</h2>
-              <p className="text-sm text-gray-600">Configure smart complaint assignment</p>
+              <h2 className="text-xl font-bold text-text-main">AI-Powered Complaint Routing</h2>
+              <p className="text-sm text-text-sub">Configure smart complaint assignment</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-background rounded-lg transition-colors"
           >
-            <XCircleIcon className="w-6 h-6 text-gray-500" />
+            <XCircleIcon className="w-6 h-6 text-text-muted" />
           </button>
         </div>
 
         <div className="p-6 space-y-6">
           {/* AI Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="bg-primary-light/40 border border-border p-4 rounded-lg">
               <div className="flex items-center gap-2">
-                <ChartBarIcon className="w-5 h-5 text-blue-600" />
-                <span className="text-sm font-medium text-blue-900">Total Processed</span>
+                <ChartBarIcon className="w-5 h-5 text-primary" />
+                <span className="text-sm font-medium text-primary">Total Processed</span>
               </div>
-              <p className="text-2xl font-bold text-blue-700 mt-1">{aiStats.totalProcessed}</p>
+              <p className="text-2xl font-bold text-primary mt-1">{aiStats.totalProcessed}</p>
             </div>
             
             <div className="bg-green-50 p-4 rounded-lg">
@@ -208,7 +208,7 @@ const AIConfigPanel = ({ onClose }) => {
                 <button
                   onClick={toggleAI}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    aiConfig.isEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                    aiConfig.isEnabled ? 'bg-primary' : 'bg-gray-300'
                   }`}
                 >
                   <span
@@ -257,7 +257,7 @@ const AIConfigPanel = ({ onClose }) => {
                       <button
                         onClick={() => toggleAutoAssign(category)}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          config.autoAssign ? 'bg-blue-600' : 'bg-gray-300'
+                          config.autoAssign ? 'bg-primary' : 'bg-gray-300'
                         }`}
                       >
                         <span
@@ -291,7 +291,7 @@ const AIConfigPanel = ({ onClose }) => {
                     ...prev,
                     memberEfficiencyThreshold: parseInt(e.target.value)
                   }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 <p className="text-xs text-gray-500 mt-1">Minimum efficiency score for member selection</p>
               </div>
@@ -309,7 +309,7 @@ const AIConfigPanel = ({ onClose }) => {
                     ...prev,
                     maxWorkload: parseInt(e.target.value)
                   }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 <p className="text-xs text-gray-500 mt-1">Maximum complaints a member can handle</p>
               </div>
@@ -323,7 +323,7 @@ const AIConfigPanel = ({ onClose }) => {
               <button
                 onClick={() => setAiConfig(prev => ({ ...prev, autoStatusUpdate: !prev.autoStatusUpdate }))}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  aiConfig.autoStatusUpdate ? 'bg-blue-600' : 'bg-gray-300'
+                  aiConfig.autoStatusUpdate ? 'bg-primary' : 'bg-gray-300'
                 }`}
               >
                 <span
@@ -347,7 +347,7 @@ const AIConfigPanel = ({ onClose }) => {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save Configuration'}
           </button>

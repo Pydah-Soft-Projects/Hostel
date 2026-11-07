@@ -127,6 +127,55 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+const AuthenticatedThemeLoader = () => {
+  const { token, user } = useAuth();
+  const isAuthenticated = Boolean(token && user);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      document.body.classList.add('theme-authenticated');
+      document.documentElement.classList.add('theme-authenticated');
+
+      if (window.ThemeLoader && typeof window.ThemeLoader.checkNow === 'function') {
+        window.ThemeLoader.checkNow();
+      }
+
+      if (!document.getElementById('runtime-theme-loader')) {
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const servers = isLocal
+          ? ['http://localhost:7000', 'https://ui-theme.pydah.edu.in']
+          : ['https://ui-theme.pydah.edu.in', 'http://localhost:7000'];
+
+        const tryLoad = (idx) => {
+          if (idx >= servers.length) return;
+          const s = servers[idx];
+          const script = document.createElement('script');
+          script.id = 'runtime-theme-loader';
+          script.src = `${s}/themes/theme-loader.js`;
+          script.setAttribute('data-theme-server', s);
+          script.setAttribute('data-poll-interval', isLocal ? '3' : '15');
+          script.onerror = () => {
+            script.remove();
+            tryLoad(idx + 1);
+          };
+          document.head.appendChild(script);
+        };
+        tryLoad(0);
+      }
+    } else {
+      document.body.classList.remove('theme-authenticated');
+      document.documentElement.classList.remove('theme-authenticated');
+
+      const script = document.getElementById('runtime-theme-loader');
+      if (script) script.remove();
+      const themeLinks = document.querySelectorAll('link[href*="theme.css"], style[data-theme]');
+      themeLinks.forEach((el) => el.remove());
+    }
+  }, [isAuthenticated]);
+
+  return null;
+};
+
 function App() {
   return (
     <HelmetProvider>
@@ -134,6 +183,7 @@ function App() {
         <IOSErrorBoundary>
           <GlobalSettingsProvider>
             <AuthProvider>
+            <AuthenticatedThemeLoader />
             <PushNotificationInitializer />
             <DynamicManifest />
             <SSOHandler />

@@ -565,20 +565,11 @@ const AdminDashboard = () => {
   }, []);
 
   return (
-    <div className="h-screen flex bg-gradient-to-br from-blue-50 via-white to-blue-50">
-      <style>{`
-        @keyframes shimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-        .animate-shimmer {
-          animation: shimmer 2s infinite linear;
-        }
-      `}</style>
+    <div className="h-screen flex bg-background">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white shadow-lg hover:bg-gray-50 transition-colors duration-200"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-surface shadow-lg hover:bg-background transition-colors duration-200"
       >
         <Bars3Icon className="w-6 h-6 text-gray-600" />
       </button>
@@ -603,27 +594,27 @@ const AdminDashboard = () => {
           x: isSidebarOpen ? 0 : '-100%',
         }}
         transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 bottom-0 w-64 lg:w-56 xl:w-64 bg-white border-r border-blue-100 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
+        className="fixed lg:relative top-0 left-0 bottom-0 w-64 lg:w-56 xl:w-64 bg-sidebar text-sidebar-text border-r border-sidebar-muted/20 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
       >
         {/* Mobile Close Button */}
         <button
           onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 text-sidebar-text transition-colors duration-200"
         >
-          <XMarkIcon className="w-6 h-6 text-gray-600" />
+          <XMarkIcon className="w-6 h-6" />
         </button>
 
         {/* Header */}
         <div className="p-4 flex-shrink-0">
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
+          <div className="bg-primary text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
             <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
               <svg className="w-4 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
               </svg>
             </div>
             <div className="flex-1">
-              <h1 className="font-semibold text-xs">Hostel Admin</h1>
-              <p className="text-xs text-blue-100">Management Portal</p>
+              <h1 className="font-semibold text-xs">Campo Hostel</h1>
+              <p className="text-xs text-white/80">Admin Portal</p>
             </div>
           </div>
         </div>
@@ -631,10 +622,10 @@ const AdminDashboard = () => {
         {/* Navigation */}
         <div className="flex-1 flex flex-col min-h-0">
           {/* Top fade indicator */}
-          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-white to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
+          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
             id="top-fade"></div>
 
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-visible"
+          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-sidebar"
             onScroll={(e) => {
               const target = e.target;
               const topFade = document.getElementById('top-fade');
@@ -665,10 +656,10 @@ const AdminDashboard = () => {
                         pathname === sub.path || pathname.startsWith(`${sub.path}/`)
                       );
                       const parentClasses = parentActive
-                        ? "bg-blue-100 text-blue-700 shadow-sm"
+                        ? "bg-primary text-white font-semibold shadow-md"
                         : submenuActive
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-black hover:bg-gray-50 hover:text-gray-900";
+                          ? "bg-white/10 text-sidebar-text font-medium"
+                          : "text-sidebar-text/80 hover:bg-white/10 hover:text-white";
                       return (
                         <button
                           onClick={() => toggleSubmenu(item.name)}
@@ -725,8 +716,8 @@ const AdminDashboard = () => {
                               to={subItem.path}
                               className={({ isActive }) =>
                                 `relative overflow-hidden flex items-center gap-3 px-4 py-2 rounded-lg text-xs font-normal transition-all duration-300 ${isActive
-                                  ? "bg-blue-100 text-blue-700 shadow-sm"
-                                  : "text-black hover:bg-gray-50 hover:text-gray-900"
+                                  ? "bg-primary text-white font-semibold shadow-md"
+                                  : "text-sidebar-muted hover:bg-white/10 hover:text-white"
                                 }`
                               }
                             >
@@ -767,7 +758,7 @@ const AdminDashboard = () => {
                               </div>
                               <span className="relative z-10">{subItem.name}</span>
                               {pathname === subItem.path && (
-                                <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-blue-500/30 to-transparent animate-shimmer"></span>
+                                <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
                               )}
                             </NavLink>
                           ))}
@@ -781,8 +772,8 @@ const AdminDashboard = () => {
                     to={item.path}
                     className={({ isActive }) =>
                       `relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-normal transition-all duration-300 ${isActive
-                        ? "bg-blue-100 text-blue-700 shadow-sm"
-                        : "text-black hover:bg-gray-50 hover:text-gray-900"
+                        ? "bg-primary text-white font-semibold shadow-md"
+                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
                       }`
                     }
                     end
@@ -824,7 +815,7 @@ const AdminDashboard = () => {
                     </div>
                     <span className="relative z-10">{item.name}</span>
                     {pathname === item.path && (
-                      <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-blue-500/30 to-transparent animate-shimmer"></span>
+                      <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
                     )}
                   </NavLink>
                 )}
@@ -833,22 +824,22 @@ const AdminDashboard = () => {
           </nav>
 
           {/* Bottom fade indicator */}
-          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-white to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
+          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
             id="bottom-fade"></div>
         </div>
 
         {/* User Profile and Logout */}
-        <div className="p-4 border-t border-gray-100 flex-shrink-0">
+        <div className="p-4 border-t border-sidebar-muted/20 flex-shrink-0">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
+            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
               {(user?.name || user?.username) ? (user?.name || user?.username).charAt(0).toUpperCase() : 'A'}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs lg:text-sm font-semibold text-gray-900 truncate">
+              <div className="text-xs lg:text-sm font-semibold text-sidebar-text truncate">
                 {user?.name || user?.username || 'Admin'}
               </div>
               <div className="flex items-center justify-between">
-                <div className="text-xs text-gray-500 truncate">
+                <div className="text-xs text-sidebar-muted truncate">
                   {user?.role === 'super_admin' ? 'Super Admin'
                     : user?.role === 'sub_admin' ? 'User'
                     : user?.role === 'custom' ? (user?.customRole || 'Custom Role')
@@ -862,7 +853,7 @@ const AdminDashboard = () => {
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
                     onClick={() => setShowResetPasswordModal(true)}
-                    className="p-1.5  hover:text-orange-600 hover:bg-orange-50 rounded-full transition-all duration-200"
+                    className="p-1.5  hover:text-primary-light hover:bg-white/10 rounded-full transition-all duration-200"
                     title="Reset Password"
                   >
                     <svg
@@ -888,7 +879,7 @@ const AdminDashboard = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all duration-300 shadow hover:shadow-md"
+            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-primary hover:bg-primary-hover rounded-lg transition-all duration-300 shadow hover:shadow-md"
           >
             <svg
               className="w-3 h-3 lg:w-4 lg:h-4"

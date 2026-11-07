@@ -67,11 +67,11 @@ const PWAInstallPrompt = () => {
           initial={{ opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -50 }}
-          className="fixed top-4 left-4 right-4 md:w-1/3 md:mx-auto z-50 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden"
+          className="fixed top-4 left-4 right-4 md:w-1/3 md:mx-auto z-50 bg-surface rounded-xl shadow-xl border border-border overflow-hidden"
         >
           {/* Mobile: Compact bottom sheet style */}
           <div className="sm:hidden">
-            <div className="p-3 bg-gradient-to-r from-blue-600 to-blue-700">
+            <div className="p-3 bg-primary text-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <DevicePhoneMobileIcon className="w-5 h-5 text-white" />
@@ -89,12 +89,12 @@ const PWAInstallPrompt = () => {
               </div>
             </div>
             <div className="p-3">
-              <p className="text-xs text-gray-600 mb-3">
+              <p className="text-xs text-text-sub mb-3">
                 Add to home screen for quick access
               </p>
               <button
                 onClick={handleInstall}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors"
               >
                 <ArrowDownTrayIcon className="w-5 h-5" />
                 <span>Install Now</span>
@@ -106,14 +106,14 @@ const PWAInstallPrompt = () => {
           <div className="hidden sm:block p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
                   <DevicePhoneMobileIcon className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">
+                  <h3 className="text-sm font-semibold text-text-main">
                     Install Pydah Hostel Digital
                   </h3>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs text-text-sub">
                     Add to home screen for quick access
                   </p>
                 </div>
@@ -121,7 +121,7 @@ const PWAInstallPrompt = () => {
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleInstall}
-                  className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 transition-colors"
+                  className="flex items-center space-x-1 px-3 py-1.5 bg-primary text-white text-xs font-medium rounded-md hover:bg-primary-hover transition-colors"
                 >
                   <ArrowDownTrayIcon className="w-4 h-4" />
                   <span>Install</span>

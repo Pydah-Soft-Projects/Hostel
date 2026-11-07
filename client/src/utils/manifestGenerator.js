@@ -69,43 +69,27 @@ export const generateManifest = (settings) => {
         "purpose": "maskable any"
       }
     ],
-    "screenshots": [
-      {
-        "src": "/images/screenshot-wide.png",
-        "sizes": "1280x720",
-        "type": "image/png",
-        "form_factor": "wide",
-        "label": `${institutionName} Management System Dashboard`
-      },
-      {
-        "src": "/images/screenshot-narrow.png",
-        "sizes": "750x1334",
-        "type": "image/png",
-        "form_factor": "narrow",
-        "label": `${institutionName} Mobile Interface`
-      }
-    ],
     "shortcuts": [
       {
         "name": "Student Dashboard",
         "short_name": "Dashboard",
         "description": "Access student dashboard",
         "url": "/student/dashboard",
-        "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
       },
       {
         "name": "Leave Management",
         "short_name": "Leave",
         "description": "Apply for leave or permission",
         "url": "/student/leave",
-        "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
       },
       {
         "name": "Complaints",
         "short_name": "Complaints",
         "description": "Raise hostel complaints",
         "url": "/student/complaints",
-        "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
       }
     ],
     "related_applications": [

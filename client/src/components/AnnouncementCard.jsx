@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 
 const AnnouncementCard = ({ announcement }) => {
   return (
-    <div className="bg-white rounded-lg shadow-md overflow-hidden">
+    <div className="bg-surface rounded-lg shadow-md overflow-hidden border border-border">
       {announcement.imageUrl && (
         <div className="relative h-48 w-full">
           <img
@@ -14,11 +14,11 @@ const AnnouncementCard = ({ announcement }) => {
         </div>
       )}
       <div className="p-4">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+        <h3 className="text-lg font-semibold text-text-main mb-2">
           {announcement.title}
         </h3>
-        <p className="text-gray-600 mb-4">{announcement.description}</p>
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <p className="text-text-sub mb-4">{announcement.description}</p>
+        <div className="flex items-center justify-between text-sm text-text-muted">
           <span>Posted by {announcement.createdBy?.name || 'Admin'}</span>
           <span>{format(new Date(announcement.createdAt), 'MMM d, yyyy')}</span>
         </div>

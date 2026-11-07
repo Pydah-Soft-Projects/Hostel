@@ -15,8 +15,8 @@ const PermissionDenied = ({ sectionName }) => {
           You don't have permission to access the <strong>{sectionName}</strong> section. 
           Please contact your super admin to request access.
         </p>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-800">
+        <div className="bg-primary-light/40 border border-border rounded-lg p-4">
+          <p className="text-sm text-primary">
             <strong>Available sections:</strong> Check the sidebar for sections you can access.
           </p>
         </div>
