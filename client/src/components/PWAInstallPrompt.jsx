@@ -111,7 +111,7 @@ const PWAInstallPrompt = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-text-main">
-                    Install Pydah Hostel Digital
+                    Install Campo Hostel Digital
                   </h3>
                   <p className="text-xs text-text-sub">
                     Add to home screen for quick access

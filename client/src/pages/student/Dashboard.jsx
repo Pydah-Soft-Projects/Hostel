@@ -338,29 +338,29 @@ const StudentDashboardLayout = () => {
           <XMarkIcon className="w-5 h-5" />
         </button>
 
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="p-4 sm:p-6 font-bold text-lg sm:text-xl tracking-wide flex items-center gap-2 flex-shrink-0"
-        >
-          <div className="p-1.5 bg-primary/20 text-primary-light rounded-lg">
-            <svg
-              className="w-6 h-6 sm:w-7 sm:h-7"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-              />
-            </svg>
+        <div className="p-4 flex-shrink-0">
+          <div className="bg-primary text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
+            <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+              <svg
+                className="w-4 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h1 className="font-semibold text-xs text-white">Campo Hostel</h1>
+              <p className="text-xs text-white/80">Student Portal</p>
+            </div>
           </div>
-          <span className="text-sidebar-text">
-            Student Portal
-          </span>
-        </motion.div>
+        </div>
 
         <nav className="flex-1 px-3 sm:px-4 space-y-1 sm:space-y-2 mt-4 overflow-y-auto scrollbar-sidebar">
           {navItems
