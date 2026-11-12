@@ -32,6 +32,77 @@
       (function() {
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         
+        function hexToRgb(hex) {
+          hex = hex.replace('#', '').trim();
+          if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+          const num = parseInt(hex, 16);
+          if (isNaN(num)) return null;
+          return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+        }
+
+        function rgbToHex(r, g, b) {
+          const clamp = (v) => Math.min(255, Math.max(0, Math.round(v)));
+          return '#' + [clamp(r), clamp(g), clamp(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+
+        function mixColor(rgb, factor) {
+          if (factor > 0) {
+            return rgbToHex(rgb[0] + (255 - rgb[0]) * factor, rgb[1] + (255 - rgb[1]) * factor, rgb[2] + (255 - rgb[2]) * factor);
+          } else {
+            const f = 1 + factor;
+            return rgbToHex(rgb[0] * f, rgb[1] * f, rgb[2] * f);
+          }
+        }
+
+        function applyThemeCss(txt) {
+          if (!txt) return;
+          const matches = txt.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g);
+          let primaryHex = null;
+          for (const m of matches) {
+            const prop = m[1].trim();
+            const val = m[2].trim();
+            document.documentElement.style.setProperty(prop, val);
+            if (prop === '--primary' && val.startsWith('#')) {
+              primaryHex = val;
+            }
+          }
+
+          // If primary is set, dynamically generate all shades and rgb values
+          if (primaryHex) {
+            const rgb = hexToRgb(primaryHex);
+            if (rgb) {
+              const shades = {
+                '--primary-rgb': `${rgb[0]}, ${rgb[1]}, ${rgb[2]}`,
+                '--primary-50': mixColor(rgb, 0.94),
+                '--primary-100': mixColor(rgb, 0.86),
+                '--primary-200': mixColor(rgb, 0.70),
+                '--primary-300': mixColor(rgb, 0.50),
+                '--primary-400': mixColor(rgb, 0.25),
+                '--primary-500': primaryHex,
+                '--primary-600': mixColor(rgb, -0.15),
+                '--primary-700': mixColor(rgb, -0.30),
+                '--primary-800': mixColor(rgb, -0.50),
+                '--primary-900': mixColor(rgb, -0.70),
+                '--primary-light': mixColor(rgb, 0.92),
+                '--primary-hover': mixColor(rgb, -0.12),
+              };
+              for (const [prop, val] of Object.entries(shades)) {
+                document.documentElement.style.setProperty(prop, val);
+              }
+            }
+          }
+
+          try {
+            localStorage.setItem('PYDAH_CACHED_THEME_CSS', txt);
+          } catch (_) {}
+        }
+
+        // Apply cached theme immediately to prevent any flicker
+        try {
+          const cached = localStorage.getItem('PYDAH_CACHED_THEME_CSS');
+          if (cached) applyThemeCss(cached);
+        } catch (_) {}
+
         // Allow explicit override via ?theme_server=... or localStorage
         try {
           const urlParams = new URLSearchParams(window.location.search);
@@ -42,7 +113,7 @@
         const savedServer = localStorage.getItem('PYDAH_THEME_SERVER');
 
         // Candidate servers in priority order:
-        // When testing on localhost, prioritize http://localhost:7001 (Theme Editor) and http://localhost:7000 (Theme Server)
+        // Prioritize http://localhost:7001 (Theme Editor) and http://localhost:7000 (Theme Server) on local
         const candidates = [];
         if (savedServer) candidates.push(savedServer);
         if (isLocal) {
@@ -63,13 +134,15 @@
               try {
                 const ctrl = new AbortController();
                 const tid = setTimeout(() => ctrl.abort(), 1200);
-                // Check if server is responding
                 let res = await fetch(`${s}/themes/version.json?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
                 if (!res || !res.ok) {
                   res = await fetch(`${s}/version.json?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
                 }
                 if (!res || !res.ok) {
                   res = await fetch(`${s}/themes/theme.css?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
+                }
+                if (!res || !res.ok) {
+                  res = await fetch(`${s}/theme.css?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
                 }
                 clearTimeout(tid);
                 if (res && res.ok) {
@@ -91,79 +164,83 @@
             link.onerror = () => { link.href = `${chosen}/theme.css?v=${Date.now()}`; };
           }
 
+          // Immediately fetch and apply theme CSS on boot
+          try {
+            fetch(`${chosen}/themes/theme.css?t=${Date.now()}`)
+              .then(res => !res.ok ? fetch(`${chosen}/theme.css?t=${Date.now()}`) : res)
+              .then(res => res.ok ? res.text() : null)
+              .then(txt => {
+                if (txt) {
+                  applyThemeCss(txt);
+                  window.dispatchEvent(new CustomEvent('theme:updated', { detail: { initial: true } }));
+                }
+              })
+              .catch(() => {});
+          } catch (_) {}
+
           // Inject theme loader script with target theme server
           const script = document.createElement('script');
           script.id = 'pydah-theme-loader';
           script.src = `${chosen}/themes/theme-loader.js`;
           script.setAttribute('data-theme-server', chosen);
-          script.setAttribute('data-poll-interval', isLocal ? '5' : '30');
+          script.setAttribute('data-poll-interval', isLocal ? '3' : '15');
           script.onerror = () => {
-            // Fallback to production loader SDK if local server doesn't host loader script
             const fb = document.createElement('script');
             fb.src = 'https://ui-theme.pydah.edu.in/themes/theme-loader.js';
             fb.setAttribute('data-theme-server', chosen);
-            fb.setAttribute('data-poll-interval', isLocal ? '5' : '30');
+            fb.setAttribute('data-poll-interval', isLocal ? '3' : '15');
             document.head.appendChild(fb);
           };
           document.head.appendChild(script);
 
-          // Fast poll for Localhost Development
-          // When testing with Theme Editor on localhost:7001, poll every 3s to apply updates as soon as "Publish Theme" is clicked
-          if (isLocal && chosen.includes('localhost')) {
-            let lastVer = null;
-            let lastCss = '';
+          // Fast poll for development & production
+          let lastVer = null;
+          let lastCss = '';
 
-            setInterval(async () => {
-              try {
-                // 1. Try polling version.json
-                let vRes = await fetch(`${chosen}/themes/version.json?t=${Date.now()}`).catch(() => null);
-                if (!vRes || !vRes.ok) {
-                  vRes = await fetch(`${chosen}/version.json?t=${Date.now()}`).catch(() => null);
-                }
+          setInterval(async () => {
+            try {
+              // 1. Try polling version.json
+              let vRes = await fetch(`${chosen}/themes/version.json?t=${Date.now()}`).catch(() => null);
+              if (!vRes || !vRes.ok) {
+                vRes = await fetch(`${chosen}/version.json?t=${Date.now()}`).catch(() => null);
+              }
 
-                if (vRes && vRes.ok) {
-                  const data = await vRes.json();
-                  const ver = data.version || data.hash || data.updatedAt || JSON.stringify(data);
-                  if (lastVer && lastVer !== ver) {
-                    console.log(`🎨 [Theme] Detected new theme published (${ver})! Applying...`);
-                    if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
-                    
-                    // Directly apply CSS variables to :root
-                    try {
-                      const cRes = await fetch(`${chosen}/themes/theme.css?v=${Date.now()}`);
-                      if (cRes.ok) {
-                        const txt = await cRes.text();
-                        const matches = txt.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g);
-                        for (const m of matches) {
-                          document.documentElement.style.setProperty(m[1].trim(), m[2].trim());
-                        }
-                      }
-                    } catch (_) {}
-
-                    window.dispatchEvent(new CustomEvent('theme:updated', { detail: data }));
+              if (vRes && vRes.ok) {
+                const data = await vRes.json();
+                const ver = data.version || data.hash || data.updatedAt || JSON.stringify(data);
+                if (lastVer && lastVer !== ver) {
+                  console.log(`🎨 [Theme] Detected new theme published (${ver})! Applying...`);
+                  if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
+                  
+                  const cRes = await fetch(`${chosen}/themes/theme.css?v=${Date.now()}`)
+                    .then(r => !r.ok ? fetch(`${chosen}/theme.css?v=${Date.now()}`) : r)
+                    .catch(() => null);
+                  if (cRes && cRes.ok) {
+                    const txt = await cRes.text();
+                    applyThemeCss(txt);
                   }
-                  lastVer = ver;
-                  return;
+                  window.dispatchEvent(new CustomEvent('theme:updated', { detail: data }));
                 }
+                lastVer = ver;
+                return;
+              }
 
-                // 2. Fallback: check theme.css directly
-                const cssRes = await fetch(`${chosen}/themes/theme.css?t=${Date.now()}`).catch(() => null);
-                if (cssRes && cssRes.ok) {
-                  const txt = await cssRes.text();
-                  if (lastCss && lastCss !== txt) {
-                    console.log('🎨 [Theme] Detected theme.css change! Updating :root...');
-                    if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
-                    const matches = txt.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g);
-                    for (const m of matches) {
-                      document.documentElement.style.setProperty(m[1].trim(), m[2].trim());
-                    }
-                    window.dispatchEvent(new CustomEvent('theme:updated', { detail: { updated: true } }));
-                  }
-                  lastCss = txt;
+              // 2. Fallback: check theme.css directly
+              const cssRes = await fetch(`${chosen}/themes/theme.css?t=${Date.now()}`)
+                .then(r => !r.ok ? fetch(`${chosen}/theme.css?t=${Date.now()}`) : r)
+                .catch(() => null);
+              if (cssRes && cssRes.ok) {
+                const txt = await cssRes.text();
+                if (lastCss && lastCss !== txt) {
+                  console.log('🎨 [Theme] Detected theme.css change! Updating :root...');
+                  if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
+                  applyThemeCss(txt);
+                  window.dispatchEvent(new CustomEvent('theme:updated', { detail: { updated: true } }));
                 }
-              } catch (_) {}
-            }, 3000);
-          }
+                lastCss = txt;
+              }
+            } catch (_) {}
+          }, isLocal ? 3000 : 15000);
         }
 
         initTheme();

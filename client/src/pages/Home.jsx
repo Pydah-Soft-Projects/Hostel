@@ -5,6 +5,7 @@ import Silk from './Silk';
 import { useInView } from 'react-intersection-observer';
 import { useAuth } from '../context/AuthContext';
 import { useGlobalSettings } from '../context/GlobalSettingsContext';
+import { useThemeTokens } from '../hooks/useThemeTokens';
 import {
   ChatBubbleLeftRightIcon,
   BellIcon,
@@ -316,6 +317,7 @@ const DeveloperCard = () => {
 const Home = () => {
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  const themeTokens = useThemeTokens();
   const { getInstitutionName, getInstitutionFullName, getPydahSoftInfo } = useGlobalSettings();
   const controls = useAnimation();
   const [ref, inView] = useInView({
@@ -358,7 +360,7 @@ const Home = () => {
           <Silk
             speed={8}
             scale={1}
-            color="#7B7481"
+            color={themeTokens.primary || "#167B72"}
             noiseIntensity={1.5}
             rotation={0}
           />
