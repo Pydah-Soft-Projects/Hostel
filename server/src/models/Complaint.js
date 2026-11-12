@@ -38,6 +38,19 @@ const feedbackSchema = new mongoose.Schema({
 }, { _id: false }); // Disable _id for subdocuments
 
 const complaintSchema = new mongoose.Schema({
+  complaintNumber: {
+    type: String,
+    trim: true,
+    index: true
+  },
+  maintenanceDbId: {
+    type: Number,
+    index: true
+  },
+  title: {
+    type: String,
+    trim: true
+  },
   student: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -69,10 +82,11 @@ const complaintSchema = new mongoose.Schema({
   category: {
     type: String,
     required: [true, 'Category is required'],
-    enum: {
-      values: ['Canteen', 'Internet', 'Maintenance', 'Common Facilities', 'Others'],
-      message: props => `${props.value} is not a valid category`
-    },
+    trim: true,
+    index: true
+  },
+  categoryId: {
+    type: Number,
     index: true
   },
   imageUrl: {
@@ -81,35 +95,11 @@ const complaintSchema = new mongoose.Schema({
   },
   subCategory: {
     type: String,
-    validate: {
-      validator: function(v) {
-        // If category is not Maintenance or Common Facilities, subCategory should be null/undefined
-        if (this.category !== 'Maintenance' && this.category !== 'Common Facilities') {
-          return !v; // Must be null/undefined for other categories
-        }
-        // For Maintenance category, require a valid sub-category
-        if (this.category === 'Maintenance') {
-          return ['Housekeeping', 'Plumbing', 'Electricity'].includes(v);
-        }
-        // For Common Facilities category, require a valid sub-category
-        if (this.category === 'Common Facilities') {
-          return ['Laundry', 'Recreation', 'Study Room', 'Dining Hall', 'Security'].includes(v);
-        }
-        return true;
-      },
-      message: function(props) {
-        if (this.category !== 'Maintenance' && this.category !== 'Common Facilities') {
-          return 'Sub-category should not be provided for this category';
-        }
-        if (this.category === 'Maintenance') {
-          return 'Sub-category must be one of: Housekeeping, Plumbing, Electricity for Maintenance complaints';
-        }
-        if (this.category === 'Common Facilities') {
-          return 'Sub-category must be one of: Laundry, Recreation, Study Room, Dining Hall, Security for Common Facilities complaints';
-        }
-        return 'Invalid sub-category';
-      }
-    }
+    trim: true
+  },
+  subCategoryId: {
+    type: Number,
+    index: true
   },
   description: {
     type: String,

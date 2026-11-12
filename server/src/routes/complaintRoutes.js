@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticateStudent, adminAuth, wardenAuth, principalAuth } from '../middleware/authMiddleware.js';
 import {
+  getComplaintCategories,
   createComplaint,
   listMyComplaints,
   giveFeedback,
@@ -53,6 +54,9 @@ router.post('/warden', wardenAuth, upload.single('image'), createWardenComplaint
 router.get('/warden', wardenAuth, listWardenComplaints);
 router.get('/warden/:id/timeline', wardenAuth, wardenGetTimeline);
 router.get('/warden/:id/details', wardenAuth, getComplaintDetails);
+
+// Categories route (must come before parameterized routes)
+router.get('/categories', getComplaintCategories);
 
 // Student routes
 router.post('/', authenticateStudent, upload.single('image'), createComplaint);

@@ -8,35 +8,26 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import SEO from '../../components/SEO';
 import { PhotoIcon, XCircleIcon, UserIcon, BuildingOfficeIcon } from '@heroicons/react/24/outline';
 
-const CATEGORIES = [
-  { value: 'Canteen', label: 'Canteen' },
-  { value: 'Internet', label: 'Internet' },
-  { value: 'Maintenance', label: 'Maintenance' },
-  { value: 'Common Facilities', label: 'Common Facilities' },
-  { value: 'Others', label: 'Others' }
-];
-
-const MAINTENANCE_SUBCATEGORIES = [
-  { value: 'Housekeeping', label: 'Housekeeping' },
-  { value: 'Plumbing', label: 'Plumbing' },
-  { value: 'Electricity', label: 'Electricity' }
-];
-
-const COMMON_FACILITIES_SUBCATEGORIES = [
-  { value: 'Laundry', label: 'Laundry' },
-  { value: 'Recreation', label: 'Recreation' },
-  { value: 'Study Room', label: 'Study Room' },
-  { value: 'Dining Hall', label: 'Dining Hall' },
-  { value: 'Security', label: 'Security' }
+const FALLBACK_CATEGORIES = [
+  { id: 4, name: 'Hostel', sub_categories: [{ id: 5, name: 'Power' }, { id: 6, name: 'Wifi' }] },
+  { id: 9, name: 'Plumbing', sub_categories: [] },
+  { id: 10, name: 'Electrical', sub_categories: [] },
+  { id: 11, name: 'Carpentry', sub_categories: [] },
+  { id: 12, name: 'House Keeping & Hygiene', sub_categories: [] },
+  { id: 7, name: 'Civil Related', sub_categories: [{ id: 8, name: 'Repair Works' }] }
 ];
 
 const WardenRaiseComplaint = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [form, setForm] = useState({
     complaintType: 'student', // 'student' or 'facility'
     studentId: '',
+    categoryId: '',
     category: '',
+    subCategoryId: '',
     subCategory: '',
     description: '',
     priority: 'medium'
@@ -51,20 +42,54 @@ const WardenRaiseComplaint = () => {
 
   useEffect(() => {
     fetchStudents();
+    fetchCategories();
   }, []);
 
-  const fetchStudents = async () => {
-    setLoadingStudents(true);
+  const fetchCategories = async () => {
     try {
-      const response = await api.get('/api/admin/students?limit=1000');
-      if (response.data.success) {
-        setStudents(response.data.data.students || []);
+      setLoadingCategories(true);
+      const res = await api.get('/api/complaints/categories');
+      if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+        setCategories(res.data.data);
+      } else {
+        setCategories(FALLBACK_CATEGORIES);
       }
-    } catch (error) {
-      console.error('Error fetching students:', error);
-      toast.error('Failed to load students');
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+      setCategories(FALLBACK_CATEGORIES);
     } finally {
-      setLoadingStudents(false);
+      setLoadingCategories(false);
+    }
+  };
+
+  const selectedCategory = categories.find(c => String(c.id) === String(form.categoryId));
+  const availableSubCategories = selectedCategory?.sub_categories || [];
+
+  const handleCategoryChange = (e) => {
+    const catId = e.target.value;
+    const catObj = categories.find(c => String(c.id) === String(catId));
+    setForm(prev => ({
+      ...prev,
+      categoryId: catId,
+      category: catObj ? catObj.name : '',
+      subCategoryId: '',
+      subCategory: ''
+    }));
+    if (errors.category) {
+      setErrors(prev => ({ ...prev, category: undefined }));
+    }
+  };
+
+  const handleSubCategoryChange = (e) => {
+    const subId = e.target.value;
+    const subObj = availableSubCategories.find(s => String(s.id) === String(subId));
+    setForm(prev => ({
+      ...prev,
+      subCategoryId: subId,
+      subCategory: subObj ? subObj.name : ''
+    }));
+    if (errors.subCategory) {
+      setErrors(prev => ({ ...prev, subCategory: undefined }));
     }
   };
 
@@ -75,11 +100,11 @@ const WardenRaiseComplaint = () => {
       newErrors.studentId = 'Please select a student';
     }
     
-    if (!form.category) {
+    if (!form.categoryId) {
       newErrors.category = 'Please select a category';
     }
     
-    if ((form.category === 'Maintenance' || form.category === 'Common Facilities') && !form.subCategory) {
+    if (availableSubCategories.length > 0 && !form.subCategoryId) {
       newErrors.subCategory = 'Please select a sub-category';
     }
     
@@ -130,8 +155,12 @@ const WardenRaiseComplaint = () => {
       if (form.complaintType === 'student') {
         formData.append('studentId', form.studentId);
       }
+      formData.append('categoryId', form.categoryId);
       formData.append('category', form.category);
-      formData.append('subCategory', form.subCategory);
+      if (form.subCategoryId) {
+        formData.append('subCategoryId', form.subCategoryId);
+        formData.append('subCategory', form.subCategory);
+      }
       formData.append('description', form.description);
       formData.append('priority', form.priority);
       formData.append('raisedBy', 'warden');
@@ -146,7 +175,7 @@ const WardenRaiseComplaint = () => {
       });
 
       if (response.data.success) {
-        toast.success('Complaint submitted successfully!');
+        toast.success('Complaint submitted successfully to Maintenance!');
         
         // Start AI processing
         setAiProcessing(true);
@@ -156,7 +185,9 @@ const WardenRaiseComplaint = () => {
         setForm({
           complaintType: 'student',
           studentId: '',
+          categoryId: '',
           category: '',
+          subCategoryId: '',
           subCategory: '',
           description: '',
           priority: 'medium'
@@ -192,15 +223,6 @@ const WardenRaiseComplaint = () => {
       console.error('Error polling AI status:', error);
       setAiProcessing(false);
     }
-  };
-
-  const getSubCategories = () => {
-    if (form.category === 'Maintenance') {
-      return MAINTENANCE_SUBCATEGORIES;
-    } else if (form.category === 'Common Facilities') {
-      return COMMON_FACILITIES_SUBCATEGORIES;
-    }
-    return [];
   };
 
   if (loadingStudents) {
@@ -333,51 +355,56 @@ const WardenRaiseComplaint = () => {
               </select>
             </div>
 
-            {/* Category Selection */}
+            {/* Category Selection from Maintenance DB */}
             <div>
               <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Category
               </label>
-              <select
-                value={form.category}
-                onChange={e => {
-                  setForm({ ...form, category: e.target.value, subCategory: '' });
-                }}
-                className={`w-full px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-xs sm:text-sm ${
-                  errors.category ? 'border-red-500' : 'border-gray-300'
-                }`}
-                required
-              >
-                <option value="">Select a category</option>
-                {CATEGORIES.map(category => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
+              {loadingCategories ? (
+                <div className="flex items-center gap-2 px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-xs sm:text-sm">
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-green-600 border-t-transparent"></div>
+                  <span>Loading categories...</span>
+                </div>
+              ) : (
+                <select
+                  value={form.categoryId}
+                  onChange={handleCategoryChange}
+                  className={`w-full px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-xs sm:text-sm ${
+                    errors.category ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  required
+                >
+                  <option value="">Select a category</option>
+                  {categories.map(category => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {errors.category && (
                 <p className="mt-1 text-xs sm:text-sm text-red-600">{errors.category}</p>
               )}
             </div>
 
-            {/* Sub-category Selection */}
-            {getSubCategories().length > 0 && (
+            {/* Sub-category Selection (only if category has subcategories) */}
+            {availableSubCategories.length > 0 && (
               <div>
                 <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                  {form.category === 'Maintenance' ? 'Maintenance Type' : 'Facility Type'}
+                  Sub-Category
                 </label>
                 <select
-                  value={form.subCategory}
-                  onChange={e => setForm({ ...form, subCategory: e.target.value })}
+                  value={form.subCategoryId}
+                  onChange={handleSubCategoryChange}
                   className={`w-full px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-xs sm:text-sm ${
                     errors.subCategory ? 'border-red-500' : 'border-gray-300'
                   }`}
                   required
                 >
-                  <option value="">Select {form.category === 'Maintenance' ? 'maintenance type' : 'facility type'}</option>
-                  {getSubCategories().map(sub => (
-                    <option key={sub.value} value={sub.value}>
-                      {sub.label}
+                  <option value="">Select sub-category</option>
+                  {availableSubCategories.map(sub => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.name}
                     </option>
                   ))}
                 </select>

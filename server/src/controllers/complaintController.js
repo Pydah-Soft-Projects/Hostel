@@ -9,6 +9,14 @@ import { createError } from '../utils/error.js';
 import { uploadToS3, deleteFromS3 } from '../utils/s3Service.js';
 import notificationService from '../utils/notificationService.js';
 import aiService from '../utils/aiService.js';
+import { 
+  insertComplaintToMaintenanceDb, 
+  generateTicketNumber, 
+  updateMaintenanceComplaintStatus, 
+  saveMaintenanceFeedback,
+  getMaintenanceCategoriesTree,
+  fetchMaintenanceComplaintsData 
+} from '../utils/maintenanceSqlService.js';
 
 import { 
   normalizeCourseName, 
@@ -22,10 +30,29 @@ const normalizeBranchName = (branchName) => {
   if (!branchName) return branchName;
   return branchName.trim().toUpperCase().replace(/\s+/g, '');
 };
+
+// Fetch dynamic categories and sub-categories from maintenance_db
+export const getComplaintCategories = async (req, res) => {
+  try {
+    const categories = await getMaintenanceCategoriesTree(true);
+    res.json({
+      success: true,
+      data: categories
+    });
+  } catch (error) {
+    console.error('Error fetching categories from maintenance db:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch categories from maintenance database',
+      error: error.message
+    });
+  }
+};
+
 // Student: create complaint
 export const createComplaint = async (req, res, next) => {
   try {
-    const { title, description, category, subCategory, priority, roomNumber } = req.body;
+    const { title, description, category, subCategory, categoryId, subCategoryId, priority, roomNumber } = req.body;
     const studentId = req.user._id;
 
     console.log('📝 Creating complaint for student:', studentId);
@@ -49,15 +76,73 @@ export const createComplaint = async (req, res, next) => {
       }
     }
 
+    // Fetch student profile with hostel details
+    const studentUser = await User.findById(studentId).populate('hostel', 'name');
+    const complaintNumber = generateTicketNumber();
+
+    const parsedCatId = categoryId ? parseInt(categoryId, 10) : undefined;
+    const parsedSubCatId = subCategoryId ? parseInt(subCategoryId, 10) : undefined;
+
     const complaint = new Complaint({
+      complaintNumber,
+      title: title || `${category}${subCategory ? ' - ' + subCategory : ''}`,
       description,
       category,
-      subCategory, 
+      categoryId: parsedCatId,
+      subCategory: subCategory || undefined,
+      subCategoryId: parsedSubCatId,
+      priority: priority || 'medium',
       student: studentId,
       imageUrl
     });
 
     await complaint.save();
+
+    // Insert complaint directly into maintenance_db
+    try {
+      const hostelName = studentUser?.hostel?.name || null;
+      const maintenanceResult = await insertComplaintToMaintenanceDb({
+        complaintNumber,
+        referenceSite: 'HMS',
+        requesterType: 'student',
+        requesterName: studentUser?.name || 'Student',
+        requesterIdentifier: studentUser?.rollNumber || studentUser?.admissionNumber,
+        requesterPhone: studentUser?.studentPhone || studentUser?.parentPhone || null,
+        requesterEmail: studentUser?.email || null,
+        category,
+        subCategory,
+        categoryId: parsedCatId,
+        subCategoryId: parsedSubCatId,
+        collegeId: studentUser?.college?.id || null,
+        collegeName: studentUser?.college?.name || null,
+        blockNo: hostelName,
+        roomNo: studentUser?.roomNumber || roomNumber || null,
+        bedNo: studentUser?.bedNumber || null,
+        title: title || `${category}${subCategory ? ' - ' + subCategory : ''}`,
+        description,
+        photoUrl: imageUrl,
+        priority: priority || 'medium',
+        status: 'pending',
+        source: 'hostel',
+        complaintType: 'student',
+        hostelId: studentUser?.hostel?._id || null,
+        hostelName,
+        mongoComplaintId: complaint._id.toString()
+      });
+
+      if (maintenanceResult?.insertId) {
+        complaint.maintenanceDbId = maintenanceResult.insertId;
+        if (!complaint.categoryId && maintenanceResult.categoryId) {
+          complaint.categoryId = maintenanceResult.categoryId;
+        }
+        if (!complaint.subCategoryId && maintenanceResult.subCategoryId) {
+          complaint.subCategoryId = maintenanceResult.subCategoryId;
+        }
+        await complaint.save();
+      }
+    } catch (maintDbErr) {
+      console.error('⚠️ Could not insert complaint into maintenance_db:', maintDbErr.message);
+    }
 
     // Populate student details for notification
     await complaint.populate('student', 'name email');
@@ -172,6 +257,10 @@ export const createComplaint = async (req, res, next) => {
 export const listMyComplaints = async (req, res) => {
   try {
     console.log('Fetching complaints for student:', req.user._id);
+
+    // Fetch student info to get rollNumber / admissionNumber
+    const studentUser = await User.findById(req.user._id).select('name rollNumber admissionNumber');
+    const identifier = studentUser?.rollNumber || studentUser?.admissionNumber;
     
     const complaints = await Complaint.find({ student: req.user._id })
       .populate('student', 'name rollNumber')
@@ -183,12 +272,88 @@ export const listMyComplaints = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    // Query maintenance_db for live status, assignments, and technician details
+    const complaintNumbers = complaints.map(c => c.complaintNumber).filter(Boolean);
+    const identifiers = identifier ? [identifier] : [];
+
+    let maintMap = new Map();
+    try {
+      maintMap = await fetchMaintenanceComplaintsData({ complaintNumbers, identifiers });
+    } catch (maintErr) {
+      console.warn('⚠️ Could not fetch maintenance complaints data:', maintErr.message);
+    }
+
+    const seenTicketNumbers = new Set();
+    const seenMaintIds = new Set();
+
+    complaints.forEach(c => {
+      if (c.complaintNumber) seenTicketNumbers.add(c.complaintNumber);
+      if (c.maintenanceDbId) seenMaintIds.add(Number(c.maintenanceDbId));
+
+      const maintInfo = (c.complaintNumber && maintMap.get(c.complaintNumber)) ||
+                        (c.maintenanceDbId && maintMap.get(String(c.maintenanceDbId))) ||
+                        maintMap.get(c._id.toString());
+
+      if (maintInfo) {
+        c.maintenanceData = maintInfo;
+        c.maintenanceStatus = maintInfo.rawStatus;
+        c.currentStatus = maintInfo.statusLabel; // 'Pending', 'Approaching', 'Resolving', 'Completed', 'Closed', 'Rejected'
+        if (maintInfo.assignedTo) {
+          c.assignedTo = maintInfo.assignedTo;
+        }
+        if (maintInfo.assignments && maintInfo.assignments.length > 0) {
+          c.assignments = maintInfo.assignments;
+        }
+        if (maintInfo.categoryName) {
+          c.category = maintInfo.categoryName;
+        }
+        if (maintInfo.subCategoryName) {
+          c.subCategory = maintInfo.subCategoryName;
+        }
+        if (maintInfo.feedback && !c.feedback) {
+          try {
+            c.feedback = typeof maintInfo.feedback === 'string' ? JSON.parse(maintInfo.feedback) : maintInfo.feedback;
+          } catch (_) {
+            c.feedback = maintInfo.feedback;
+          }
+        }
+      }
+    });
+
+    // Also include any maintenance complaints filed under this student rollNumber not yet in Mongo
+    for (const [key, maintInfo] of maintMap.entries()) {
+      if (!maintInfo.complaintNumber || key !== maintInfo.complaintNumber) continue;
+      if (seenTicketNumbers.has(maintInfo.complaintNumber) || seenMaintIds.has(Number(maintInfo.maintenanceId))) {
+        continue;
+      }
+      complaints.push({
+        _id: maintInfo.mongoComplaintId || `maint_${maintInfo.maintenanceId}`,
+        complaintNumber: maintInfo.complaintNumber,
+        maintenanceDbId: maintInfo.maintenanceId,
+        title: maintInfo.title || `${maintInfo.categoryName || 'Maintenance'}${maintInfo.subCategoryName ? ' - ' + maintInfo.subCategoryName : ''}`,
+        description: maintInfo.description || '',
+        category: maintInfo.categoryName || 'Maintenance',
+        subCategory: maintInfo.subCategoryName || null,
+        currentStatus: maintInfo.statusLabel,
+        maintenanceStatus: maintInfo.rawStatus,
+        assignedTo: maintInfo.assignedTo,
+        assignments: maintInfo.assignments || [],
+        imageUrl: maintInfo.photoUrl || null,
+        priority: maintInfo.priority || 'medium',
+        createdAt: maintInfo.createdAt || new Date(),
+        feedback: maintInfo.feedback,
+        student: {
+          _id: req.user._id,
+          name: studentUser?.name || req.user.name,
+          rollNumber: identifier
+        }
+      });
+      seenTicketNumbers.add(maintInfo.complaintNumber);
+    }
+
+    complaints.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
     console.log('Found complaints:', complaints.length);
-    console.log('Sample complaint:', complaints[0] ? {
-      id: complaints[0]._id,
-      hasAssignedTo: !!complaints[0].assignedTo,
-      assignedToDetails: complaints[0].assignedTo
-    } : 'No complaints found');
 
     res.json({
       success: true,
@@ -211,19 +376,80 @@ export const giveFeedback = async (req, res) => {
   try {
     const { id } = req.params;
     const { isSatisfied, comment } = req.body;
-    const complaint = await Complaint.findOne({ _id: id, student: req.user._id });
-    
-    if (!complaint) {
+    let complaint = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      complaint = await Complaint.findOne({ _id: id, student: req.user._id });
+    }
+
+    // Try fetching maintenance data to cross-check live status across databases
+    let maintData = null;
+    try {
+      const queryNumbers = complaint?.complaintNumber ? [complaint.complaintNumber] : (id.startsWith('TKT-') ? [id] : []);
+      const numericIds = /^\d+$/.test(id) ? [id] : (complaint?.maintenanceDbId ? [String(complaint.maintenanceDbId)] : (id.startsWith('maint_') ? [id.replace('maint_', '')] : []));
+
+      const maintMap = await fetchMaintenanceComplaintsData({
+        complaintNumbers: queryNumbers,
+        identifiers: [req.user.rollNumber || req.user.admissionNumber].filter(Boolean),
+        ids: numericIds
+      });
+
+      maintData = (complaint?.complaintNumber && maintMap.get(complaint.complaintNumber)) ||
+                  (complaint?.maintenanceDbId && maintMap.get(String(complaint.maintenanceDbId))) ||
+                  maintMap.get(id) ||
+                  (id.startsWith('maint_') ? maintMap.get(id.replace('maint_', '')) : null);
+
+      if (!maintData && complaint?.title && maintMap.size > 0) {
+        const normTitle = complaint.title.trim().toLowerCase();
+        maintData = [...maintMap.values()].find(m => m.title && m.title.trim().toLowerCase() === normTitle) || null;
+      }
+    } catch (e) {
+      console.warn('⚠️ Error querying maintenance data for feedback:', e.message);
+    }
+
+    if (!complaint && !maintData) {
       return res.status(404).json({ 
         success: false,
         message: 'Complaint not found' 
       });
     }
 
-    if (complaint.currentStatus !== 'Resolved') {
+    // Determine completion status across MongoDB and maintenance_db
+    const mongoStatus = (complaint?.currentStatus || '').toLowerCase();
+    const maintRawStatus = (maintData?.rawStatus || '').toLowerCase();
+    const maintLabel = (maintData?.statusLabel || '').toLowerCase();
+
+    const allowedStatuses = ['resolved', 'completed', 'closed'];
+    const isCompletedStatus = 
+      allowedStatuses.includes(mongoStatus) ||
+      allowedStatuses.includes(maintRawStatus) ||
+      allowedStatuses.includes(maintLabel);
+
+    if (!isCompletedStatus) {
       return res.status(400).json({
         success: false,
-        message: 'Feedback can only be given for resolved complaints'
+        message: 'Feedback can only be given for completed or resolved complaints'
+      });
+    }
+
+    // If complaint only exists in maintenance_db
+    if (!complaint && maintData) {
+      const identifier = maintData.complaintNumber || maintData.maintenanceId || id;
+      await saveMaintenanceFeedback(identifier, { isSatisfied, comment });
+      return res.json({
+        success: true,
+        message: isSatisfied 
+          ? 'Thank you for your feedback! Complaint has been closed.' 
+          : 'Complaint has been reopened for further attention.',
+        data: {
+          _id: id,
+          complaintNumber: maintData.complaintNumber,
+          currentStatus: isSatisfied ? 'Closed' : 'In Progress',
+          feedback: {
+            isSatisfied,
+            comment,
+            timestamp: new Date()
+          }
+        }
       });
     }
 
@@ -245,17 +471,22 @@ export const giveFeedback = async (req, res) => {
       });
 
       // Notify admins
-      const admins = await Admin.find({ 
-        role: { $in: ['admin', 'super_admin', 'sub_admin'] },
-        isActive: true
-      });
-      for (const admin of admins) {
-        await notificationService.sendComplaintNotification(
-          admin._id,
-          complaint,
-          complaint.student.name,
-          req.user._id
-        );
+      const studentName = complaint.student?.name || req.user.name || 'Student';
+      try {
+        const admins = await Admin.find({ 
+          role: { $in: ['admin', 'super_admin', 'sub_admin'] },
+          isActive: true
+        });
+        for (const admin of admins) {
+          await notificationService.sendComplaintNotification(
+            admin._id,
+            complaint,
+            studentName,
+            req.user._id
+          );
+        }
+      } catch (notifyErr) {
+        console.warn('⚠️ Error sending admin notification on reopened complaint:', notifyErr.message);
       }
     } else {
       // If satisfied, move to Closed status and lock it
@@ -279,21 +510,37 @@ export const giveFeedback = async (req, res) => {
       }
 
       // Notify admins
-      const admins = await Admin.find({ 
-        role: { $in: ['admin', 'super_admin', 'sub_admin'] },
-        isActive: true
-      });
-      for (const admin of admins) {
-        await notificationService.sendComplaintNotification(
-          admin._id,
-          complaint,
-          complaint.student.name,
-          req.user._id
-        );
+      const studentName = complaint.student?.name || req.user.name || 'Student';
+      try {
+        const admins = await Admin.find({ 
+          role: { $in: ['admin', 'super_admin', 'sub_admin'] },
+          isActive: true
+        });
+        for (const admin of admins) {
+          await notificationService.sendComplaintNotification(
+            admin._id,
+            complaint,
+            studentName,
+            req.user._id
+          );
+        }
+      } catch (notifyErr) {
+        console.warn('⚠️ Error sending admin notification on closed complaint:', notifyErr.message);
       }
     }
 
     await complaint.save();
+
+    // Sync feedback to maintenance_db
+    try {
+      await saveMaintenanceFeedback({
+        complaintNumber: complaint.complaintNumber || maintData?.complaintNumber,
+        maintenanceDbId: complaint.maintenanceDbId || maintData?.maintenanceId,
+        id: maintData?.maintenanceId
+      }, { isSatisfied, comment });
+    } catch (maintFeedbackError) {
+      console.error('⚠️ Error syncing feedback to maintenance_db:', maintFeedbackError.message);
+    }
 
     res.json({ 
       success: true, 
@@ -313,51 +560,91 @@ export const giveFeedback = async (req, res) => {
 export const getComplaintTimeline = async (req, res) => {
   try {
     const { id } = req.params;
-    const complaint = await Complaint.findOne({ _id: id, student: req.user._id })
-      .populate({
-        path: 'assignedTo',
-        select: 'name category phone email',
-        model: 'Member'
-      })
-      .populate('student', 'name rollNumber');
+    let complaint = null;
 
-    if (!complaint) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      complaint = await Complaint.findOne({ _id: id, student: req.user._id })
+        .populate({
+          path: 'assignedTo',
+          select: 'name category phone email',
+          model: 'Member'
+        })
+        .populate('student', 'name rollNumber');
+    }
+
+    // Try fetching maintenance data
+    let maintData = null;
+    try {
+      const queryNumbers = complaint?.complaintNumber ? [complaint.complaintNumber] : (id.startsWith('TKT-') ? [id] : []);
+      const numericIds = /^\d+$/.test(id) ? [id] : (complaint?.maintenanceDbId ? [String(complaint.maintenanceDbId)] : (id.startsWith('maint_') ? [id.replace('maint_', '')] : []));
+      const maintMap = await fetchMaintenanceComplaintsData({
+        complaintNumbers: queryNumbers,
+        identifiers: [],
+        ids: numericIds
+      });
+      maintData = (complaint?.complaintNumber && maintMap.get(complaint.complaintNumber)) ||
+                  (complaint?.maintenanceDbId && maintMap.get(String(complaint.maintenanceDbId))) ||
+                  maintMap.get(id) ||
+                  (id.startsWith('maint_') ? maintMap.get(id.replace('maint_', '')) : null);
+    } catch (e) {
+      console.warn('⚠️ Error querying maintenance timeline:', e.message);
+    }
+
+    if (!complaint && !maintData) {
       return res.status(404).json({ 
         success: false,
         message: 'Complaint not found' 
       });
     }
 
-    // Get timeline from status history with populated assigned members
-    console.log('📝 Raw status history:', complaint.statusHistory);
-    const timeline = await Promise.all(complaint.statusHistory.map(async entry => {
-      // For each entry, populate the assignedTo member if it exists
-      let assignedMember = null;
-      if (entry.assignedTo) {
-        assignedMember = await Member.findById(entry.assignedTo)
-          .select('name category phone email')
-          .lean();
-      }
-      
-      const timelineEntry = {
-        status: entry.status,
-        note: entry.note,
-        timestamp: entry.timestamp,
-        assignedTo: assignedMember,
-        updatedBy: entry.updatedBy ? await User.findById(entry.updatedBy).select('name role').lean() : null
-      };
-      
-      console.log('📝 Timeline entry:', timelineEntry);
-      return timelineEntry;
-    }));
+    let timeline = [];
 
-    // Add initial entry if no history
+    // Prioritize maintenance status_history if available
+    if (maintData && Array.isArray(maintData.statusHistory) && maintData.statusHistory.length > 0) {
+      const STATUS_MAP = {
+        pending: 'Pending',
+        approaching: 'Approaching',
+        resolving: 'Resolving',
+        completed: 'Completed',
+        closed: 'Closed',
+        rejected: 'Rejected'
+      };
+
+      timeline = maintData.statusHistory.map(h => {
+        const rawNew = (h.new_status || '').toLowerCase();
+        const displayStatus = STATUS_MAP[rawNew] || (h.new_status ? h.new_status.charAt(0).toUpperCase() + h.new_status.slice(1) : 'Updated');
+        return {
+          status: displayStatus,
+          note: h.notes || (h.old_status ? `Status changed to ${displayStatus}` : `Status initialized as ${displayStatus}`),
+          timestamp: h.created_at || h.timestamp || new Date().toISOString(),
+          assignedTo: maintData.assignedTo || null,
+          updatedBy: h.changed_by ? { name: h.changed_by, role: 'Maintenance Team' } : null
+        };
+      });
+    } else if (complaint && complaint.statusHistory && complaint.statusHistory.length > 0) {
+      timeline = await Promise.all(complaint.statusHistory.map(async entry => {
+        let assignedMember = null;
+        if (entry.assignedTo) {
+          assignedMember = await Member.findById(entry.assignedTo)
+            .select('name category phone email')
+            .lean();
+        }
+        return {
+          status: entry.status,
+          note: entry.note,
+          timestamp: entry.timestamp,
+          assignedTo: assignedMember || maintData?.assignedTo || null,
+          updatedBy: entry.updatedBy ? await User.findById(entry.updatedBy).select('name role').lean() : null
+        };
+      }));
+    }
+
     if (timeline.length === 0) {
       timeline.push({
-        status: complaint.currentStatus,
+        status: maintData?.statusLabel || complaint?.currentStatus || 'Pending',
         note: 'Complaint created',
-        timestamp: complaint.createdAt,
-        assignedTo: complaint.assignedTo,
+        timestamp: maintData?.createdAt || complaint?.createdAt || new Date().toISOString(),
+        assignedTo: maintData?.assignedTo || complaint?.assignedTo || null,
         updatedBy: null
       });
     }
@@ -369,8 +656,9 @@ export const getComplaintTimeline = async (req, res) => {
       success: true,
       data: {
         timeline,
-        currentAssignedTo: complaint.assignedTo,
-        student: complaint.student
+        currentAssignedTo: maintData?.assignedTo || complaint?.assignedTo || null,
+        student: complaint?.student || { name: req.user.name, rollNumber: req.user.rollNumber },
+        assignments: maintData?.assignments || []
       }
     });
   } catch (error) {
@@ -671,6 +959,15 @@ export const updateComplaintStatus = async (req, res) => {
 
     await complaint.save();
 
+    // Sync status update to maintenance_db
+    try {
+      const identifier = complaint.complaintNumber || complaint.maintenanceDbId || complaint._id.toString();
+      const changerName = req.admin ? req.admin.username : (req.user?.name || 'Admin');
+      await updateMaintenanceComplaintStatus(identifier, status, changerName, statusNote);
+    } catch (maintStatusErr) {
+      console.warn('⚠️ Could not sync status update to maintenance_db:', maintStatusErr.message);
+    }
+
     // Update member efficiency if complaint is resolved
     if (status === 'Resolved' && complaint.assignedTo) {
       try {
@@ -816,35 +1113,91 @@ export const submitFeedback = async (req, res) => {
     const { id } = req.params;
     const { isSatisfied, comment } = req.body;
 
-    const complaint = await Complaint.findById(id);
-    if (!complaint) {
-      return res.status(404).json({
-        success: false,
-        message: 'Complaint not found'
-      });
+    let complaint = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      complaint = await Complaint.findById(id);
     }
 
     // Check if complaint belongs to student
-    if (complaint.student.toString() !== req.user._id.toString()) {
+    if (complaint && complaint.student && complaint.student.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to submit feedback for this complaint'
       });
     }
 
-    // Check if complaint is resolved
-    if (complaint.currentStatus !== 'Resolved') {
-      return res.status(400).json({
+    // Try fetching maintenance data to cross-check live status
+    let maintData = null;
+    try {
+      const queryNumbers = complaint?.complaintNumber ? [complaint.complaintNumber] : (id.startsWith('TKT-') ? [id] : []);
+      const numericIds = /^\d+$/.test(id) ? [id] : (complaint?.maintenanceDbId ? [String(complaint.maintenanceDbId)] : (id.startsWith('maint_') ? [id.replace('maint_', '')] : []));
+
+      const maintMap = await fetchMaintenanceComplaintsData({
+        complaintNumbers: queryNumbers,
+        identifiers: [req.user.rollNumber || req.user.admissionNumber].filter(Boolean),
+        ids: numericIds
+      });
+
+      maintData = (complaint?.complaintNumber && maintMap.get(complaint.complaintNumber)) ||
+                  (complaint?.maintenanceDbId && maintMap.get(String(complaint.maintenanceDbId))) ||
+                  maintMap.get(id) ||
+                  (id.startsWith('maint_') ? maintMap.get(id.replace('maint_', '')) : null);
+
+      if (!maintData && complaint?.title && maintMap.size > 0) {
+        const normTitle = complaint.title.trim().toLowerCase();
+        maintData = [...maintMap.values()].find(m => m.title && m.title.trim().toLowerCase() === normTitle) || null;
+      }
+    } catch (e) {
+      console.warn('⚠️ Error querying maintenance data for submitFeedback:', e.message);
+    }
+
+    if (!complaint && !maintData) {
+      return res.status(404).json({
         success: false,
-        message: 'Feedback can only be submitted for resolved complaints'
+        message: 'Complaint not found'
       });
     }
 
-    // Check if feedback already exists
-    if (complaint.feedback) {
+    // Check if complaint is resolved or completed
+    const mongoStatus = (complaint?.currentStatus || '').toLowerCase();
+    const maintRawStatus = (maintData?.rawStatus || '').toLowerCase();
+    const maintLabel = (maintData?.statusLabel || '').toLowerCase();
+    const allowedStatuses = ['resolved', 'completed', 'closed'];
+
+    const isCompletedStatus = 
+      allowedStatuses.includes(mongoStatus) ||
+      allowedStatuses.includes(maintRawStatus) ||
+      allowedStatuses.includes(maintLabel);
+
+    if (!isCompletedStatus) {
+      return res.status(400).json({
+        success: false,
+        message: 'Feedback can only be submitted for completed or resolved complaints'
+      });
+    }
+
+    // Check if feedback already exists in MongoDB
+    if (complaint && complaint.feedback) {
       return res.status(400).json({
         success: false,
         message: 'Feedback already submitted for this complaint'
+      });
+    }
+
+    if (!complaint && maintData) {
+      const identifier = maintData.complaintNumber || maintData.maintenanceId || id;
+      await saveMaintenanceFeedback(identifier, { isSatisfied, comment });
+      return res.json({
+        success: true,
+        data: {
+          _id: id,
+          complaintNumber: maintData.complaintNumber,
+          currentStatus: isSatisfied ? 'Closed' : 'In Progress',
+          feedback: { isSatisfied, comment, timestamp: new Date() }
+        },
+        message: isSatisfied 
+          ? 'Thank you for your feedback! Complaint has been closed.'
+          : 'Complaint has been reopened for further attention.'
       });
     }
 
@@ -888,6 +1241,17 @@ export const submitFeedback = async (req, res) => {
 
     await complaint.save();
 
+    // Sync feedback to maintenance_db
+    try {
+      await saveMaintenanceFeedback({
+        complaintNumber: complaint.complaintNumber || maintData?.complaintNumber,
+        maintenanceDbId: complaint.maintenanceDbId || maintData?.maintenanceId,
+        id: maintData?.maintenanceId
+      }, { isSatisfied, comment });
+    } catch (maintFeedbackError) {
+      console.error('⚠️ Error syncing feedback to maintenance_db in submitFeedback:', maintFeedbackError.message);
+    }
+
     res.json({
       success: true,
       data: complaint,
@@ -910,24 +1274,47 @@ export const getComplaintDetails = async (req, res) => {
     const { id } = req.params;
     console.log('Fetching complaint details for ID:', id);
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      console.log('Invalid complaint ID format:', id);
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid complaint ID format'
-      });
+    let complaint = null;
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      complaint = await Complaint.findById(id)
+        .populate('student', 'name rollNumber studentPhone')
+        .populate({
+          path: 'assignedTo',
+          select: 'name category phone email',
+          model: 'Member'
+        })
+        .lean();
+
+      // Check if the complaint belongs to the student (only for student routes)
+      // Skip this check for admin routes (when req.admin exists)
+      if (complaint && !req.admin && complaint.student?._id?.toString() !== req.user?._id?.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized to view this complaint'
+        });
+      }
     }
 
-    const complaint = await Complaint.findById(id)
-      .populate('student', 'name rollNumber studentPhone')
-      .populate({
-        path: 'assignedTo',
-        select: 'name category phone email',
-        model: 'Member'
-      })
-      .lean();
+    // Try fetching maintenance data
+    let maintData = null;
+    try {
+      const queryNumbers = complaint?.complaintNumber ? [complaint.complaintNumber] : (id.startsWith('TKT-') ? [id] : []);
+      const numericIds = /^\d+$/.test(id) ? [id] : (complaint?.maintenanceDbId ? [String(complaint.maintenanceDbId)] : (id.startsWith('maint_') ? [id.replace('maint_', '')] : []));
+      const maintMap = await fetchMaintenanceComplaintsData({
+        complaintNumbers: queryNumbers,
+        identifiers: [],
+        ids: numericIds
+      });
+      maintData = (complaint?.complaintNumber && maintMap.get(complaint.complaintNumber)) ||
+                  (complaint?.maintenanceDbId && maintMap.get(String(complaint.maintenanceDbId))) ||
+                  maintMap.get(id) ||
+                  (id.startsWith('maint_') ? maintMap.get(id.replace('maint_', '')) : null);
+    } catch (e) {
+      console.warn('⚠️ Error querying maintenance details:', e.message);
+    }
 
-    if (!complaint) {
+    if (!complaint && !maintData) {
       console.log('Complaint not found with ID:', id);
       return res.status(404).json({
         success: false,
@@ -935,13 +1322,52 @@ export const getComplaintDetails = async (req, res) => {
       });
     }
 
-    // Check if the complaint belongs to the student (only for student routes)
-    // Skip this check for admin routes (when req.admin exists)
-    if (!req.admin && complaint.student._id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to view this complaint'
-      });
+    if (!complaint && maintData) {
+      // Synthesized complaint object
+      complaint = {
+        _id: id,
+        complaintNumber: maintData.complaintNumber,
+        maintenanceDbId: maintData.maintenanceId,
+        title: maintData.title || `${maintData.categoryName || 'Maintenance'}`,
+        description: maintData.description || '',
+        category: maintData.categoryName || 'Maintenance',
+        subCategory: maintData.subCategoryName || null,
+        currentStatus: maintData.statusLabel,
+        maintenanceStatus: maintData.rawStatus,
+        assignedTo: maintData.assignedTo,
+        assignments: maintData.assignments || [],
+        imageUrl: maintData.photoUrl || null,
+        priority: maintData.priority || 'medium',
+        createdAt: maintData.createdAt || new Date(),
+        feedback: maintData.feedback,
+        student: {
+          name: req.user?.name || 'Student',
+          rollNumber: req.user?.rollNumber || ''
+        }
+      };
+    } else if (complaint && maintData) {
+      complaint.maintenanceData = maintData;
+      complaint.maintenanceStatus = maintData.rawStatus;
+      complaint.currentStatus = maintData.statusLabel;
+      if (maintData.assignedTo) {
+        complaint.assignedTo = maintData.assignedTo;
+      }
+      if (maintData.assignments && maintData.assignments.length > 0) {
+        complaint.assignments = maintData.assignments;
+      }
+      if (maintData.categoryName) {
+        complaint.category = maintData.categoryName;
+      }
+      if (maintData.subCategoryName) {
+        complaint.subCategory = maintData.subCategoryName;
+      }
+      if (maintData.feedback && !complaint.feedback) {
+        try {
+          complaint.feedback = typeof maintData.feedback === 'string' ? JSON.parse(maintData.feedback) : maintData.feedback;
+        } catch (_) {
+          complaint.feedback = maintData.feedback;
+        }
+      }
     }
 
     res.json({
@@ -1292,7 +1718,9 @@ export const createWardenComplaint = async (req, res, next) => {
     }
 
     // Create complaint object
+    const complaintNumber = generateTicketNumber();
     const complaintData = {
+      complaintNumber,
       description,
       category,
       subCategory,
@@ -1313,7 +1741,43 @@ export const createWardenComplaint = async (req, res, next) => {
 
     // Populate student details if it's a student complaint
     if (complaintType === 'student' && studentId) {
-      await complaint.populate('student', 'name email rollNumber roomNumber category');
+      await complaint.populate('student', 'name email rollNumber roomNumber category college');
+    }
+
+    // Insert into maintenance_db with reference_site: HMS
+    try {
+      const studentObj = complaint.student;
+      const maintenanceResult = await insertComplaintToMaintenanceDb({
+        complaintNumber,
+        referenceSite: 'HMS',
+        requesterType: complaintType === 'student' ? 'student' : 'staff',
+        requesterName: complaintType === 'student' ? (studentObj?.name || 'Student') : (req.warden?.name || 'Warden'),
+        requesterIdentifier: complaintType === 'student' ? (studentObj?.rollNumber || studentObj?.admissionNumber) : (req.warden?.username || req.warden?.email || `WARDEN-${wardenId}`),
+        requesterPhone: studentObj?.studentPhone || req.warden?.phone || null,
+        requesterEmail: studentObj?.email || req.warden?.email || null,
+        category,
+        subCategory,
+        collegeId: studentObj?.college?.id || null,
+        collegeName: studentObj?.college?.name || null,
+        blockNo: req.warden?.hostel?.name || null,
+        roomNo: studentObj?.roomNumber || null,
+        title: `${category}${subCategory ? ' - ' + subCategory : ''}`,
+        description,
+        photoUrl: imageUrl,
+        priority: priority || 'medium',
+        status: 'pending',
+        source: 'hostel',
+        complaintType: complaintType || 'student',
+        wardenId: String(wardenId),
+        wardenName: req.warden?.name || 'Warden'
+      });
+
+      if (maintenanceResult?.insertId) {
+        complaint.maintenanceDbId = maintenanceResult.insertId;
+        await complaint.save();
+      }
+    } catch (maintDbErr) {
+      console.error('⚠️ Could not insert warden complaint into maintenance_db:', maintDbErr.message);
     }
 
     console.log('📝 Warden complaint created successfully:', complaint._id);
