@@ -28,7 +28,7 @@ const SEO = ({
   const seoDescription = getSEODescription(description);
   const seoKeywords = getSEOKeywords(keywords);
   const websiteUrl = canonicalUrl || getWebsiteUrl();
-  const ogImageUrl = ogImage || settings?.seo?.ogImage || `${getWebsiteUrl()}/og-image.jpg`;
+  const ogImageUrl = ogImage || settings?.seo?.ogImage || `${getWebsiteUrl()}/campo-logos/og-image.png`;
 
   // Default structured data for the organization
   const defaultStructuredData = {
@@ -38,7 +38,7 @@ const SEO = ({
     "alternateName": getInstitutionFullName(),
     "description": seoDescription,
     "url": websiteUrl,
-    "logo": `${websiteUrl}/PYDAH_LOGO_PHOTO.jpg`,
+    "logo": `${websiteUrl}/campo-logos/og-image.png`,
     "sameAs": [
       getMainWebsiteUrl(),
       getPydahSoftInfo().website

@@ -214,11 +214,14 @@ const HomeAlt = () => {
                 </div>
               );
             })}
-            {/* Center label (replace with logo placeholder) */}
+            {/* Center label */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-              <div className="bg-white rounded-full shadow-lg flex items-center justify-center" style={{ width: 64, height: 64 }}>
-                {/* Replace with your logo image below if available */}
-                <span className="text-blue-700 font-bold text-lg select-none">LOGO</span>
+              <div className="bg-white rounded-full shadow-lg flex items-center justify-center p-2" style={{ width: 64, height: 64 }}>
+                <img
+                  src="/campo-logos/icon-192.png"
+                  alt="Campo Hostel Logo"
+                  className="w-full h-full object-contain rounded-full"
+                />
               </div>
             </div>
           </div>

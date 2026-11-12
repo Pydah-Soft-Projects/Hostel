@@ -605,18 +605,15 @@ const AdminDashboard = () => {
         </button>
 
         {/* Header */}
-        <div className="p-4 flex-shrink-0">
-          <div className="bg-primary text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
-            <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
-              <svg className="w-4 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h1 className="font-semibold text-xs">Campo Hostel</h1>
-              <p className="text-xs text-white/80">Admin Portal</p>
-            </div>
-          </div>
+        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
+          <img
+            src="/campo-logos/campo_logo_transparent_hq.png"
+            alt="Campo Hostel"
+            className="h-8 w-auto object-contain object-left"
+          />
+          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
+            Hostel · Admin Portal
+          </p>
         </div>
 
         {/* Navigation */}
