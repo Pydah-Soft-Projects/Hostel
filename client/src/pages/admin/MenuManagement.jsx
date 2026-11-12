@@ -44,6 +44,20 @@ const STANDARD_MENU_ITEMS = {
     { name: 'Vankaya Curry (Brinjal)', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
     { name: 'Aritikaya Popu (Raw Banana)', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
     { name: 'Paneer Batani Curry', imageUrl: 'https://images.unsplash.com/photo-1631452180519-c014fe946bc7?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Vankaya Batani Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Cabbage Chana Dal Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Pesara Punukulu Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Aritikaya Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Makarani Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Gongura Makarani Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Gutthi Vankaya Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Gutthi Dondakaya Fry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Meal Maker Mulkada Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Mulkada Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Bobbara Chikkudu Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Kabul Chana Dal Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Aritikaya Fry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
+    { name: 'Potato Popu', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries & Fries' },
     { name: 'Chicken Curry', imageUrl: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80', category: 'Non-Veg' },
     { name: 'Chicken Semi Gravy', imageUrl: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?auto=format&fit=crop&w=400&q=80', category: 'Non-Veg' },
     { name: 'Curd', imageUrl: 'https://images.unsplash.com/photo-1571212515416-fef01fc43637?auto=format&fit=crop&w=400&q=80', category: 'Accompaniments' },
@@ -86,6 +100,20 @@ const STANDARD_MENU_ITEMS = {
     { name: 'Potato Kurma / Aloo Curry', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
     { name: 'Meal Maker Kurma (Soya)', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
     { name: 'Bendakaya Fry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Vankaya Batani Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Cabbage Chana Dal Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Pesara Punukulu Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Aritikaya Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Makarani Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Gongura Makarani Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Gutthi Vankaya Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Gutthi Dondakaya Fry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Meal Maker Mulkada Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Mulkada Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Bobbara Chikkudu Tomato Curry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Kabul Chana Dal Curry', imageUrl: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Aritikaya Fry', imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
+    { name: 'Potato Popu', imageUrl: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80', category: 'Curries' },
     { name: 'Sweet Semiya (Payasam)', imageUrl: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?auto=format&fit=crop&w=400&q=80', category: 'Desserts' },
     { name: 'Kesari Sweet', imageUrl: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?auto=format&fit=crop&w=400&q=80', category: 'Desserts' }
   ]
@@ -1647,7 +1675,7 @@ const MenuManagement = () => {
                 </div>
 
                 {/* Standard Items Section: Search bar first, then dropdown below */}
-                <div className="bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-200 rounded-lg p-2.5 sm:p-3 w-full min-w-0 space-y-2">
+                <div ref={standardDropdownRef} className="bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-200 rounded-lg p-2.5 sm:p-3 w-full min-w-0 space-y-2">
                   <label className="block text-xs font-semibold text-blue-900">
                     Select Standard Item (With Photo)
                   </label>
@@ -1659,7 +1687,7 @@ const MenuManagement = () => {
                       value={standardDropdownSearch}
                       onChange={e => {
                         setStandardDropdownSearch(e.target.value);
-                        if (!isStandardDropdownOpen && e.target.value.trim()) {
+                        if (e.target.value.trim()) {
                           setIsStandardDropdownOpen(true);
                         }
                       }}
@@ -1688,7 +1716,7 @@ const MenuManagement = () => {
 
                   {/* 2. Dropdown (represented below the search bar) */}
                   <div className="flex items-center gap-2 w-full min-w-0">
-                    <div ref={standardDropdownRef} className="relative flex-1 min-w-0">
+                    <div className="relative flex-1 min-w-0">
                       <button
                         type="button"
                         onClick={() => setIsStandardDropdownOpen(prev => !prev)}
@@ -1722,8 +1750,13 @@ const MenuManagement = () => {
                       {isStandardDropdownOpen && (
                         <div className="absolute left-0 right-0 top-full mt-1 w-full bg-white border border-blue-300 rounded-lg shadow-xl z-30 max-h-52 overflow-y-auto divide-y divide-gray-100">
                           {(() => {
+                            const query = (standardDropdownSearch || '')
+                              .toLowerCase()
+                              .trim()
+                              .replace(/\s+/g, ' ')
+                              .replace(/pototo/g, 'potato');
                             const filtered = (STANDARD_MENU_ITEMS[selectedMealType] || []).filter(item =>
-                              item.name.toLowerCase().includes((standardDropdownSearch || '').toLowerCase().trim())
+                              item.name.toLowerCase().includes(query)
                             );
                             if (filtered.length === 0) {
                               return (
