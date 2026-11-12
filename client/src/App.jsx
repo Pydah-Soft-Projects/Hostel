@@ -22,6 +22,7 @@ import SSOHandler from './components/SSOHandler';
 
 // Lazy load components
 const Login = lazy(() => import('./pages/Login'));
+const Sidebar = lazy(() => import('./pages/Sidebar'));
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
 const StudentDashboard = lazy(() => import('./pages/student/Dashboard'));
 const WardenDashboard = lazy(() => import('./pages/warden/WardenDashboard'));
@@ -182,6 +183,7 @@ function App() {
                 <Route path="/home-alt" element={<HomeAlt />} />
 
                 {/* Public routes */}
+                <Route path="/sidebar" element={<Sidebar />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="leave/qr/:id" element={<LeaveQRDetails />} />
                 <Route path="/student/preregister" element={<StudentPreRegistration />} />

@@ -8,6 +8,21 @@ import {
   ShieldExclamationIcon
 } from '@heroicons/react/24/outline';
 import NotificationBell from '../../components/NotificationBell';
+import CampoSidebar from '../../components/CampoSidebar';
+import {
+  LayoutDashboard,
+  CalendarCheck,
+  TicketCheck,
+  CalendarDays,
+  Users,
+  Receipt,
+  Zap,
+  BedDouble,
+  Sliders,
+  FileSpreadsheet,
+  Bell,
+  Menu
+} from 'lucide-react';
 
 // Permission Denied Component
 const PermissionDenied = ({ sectionName }) => {
@@ -40,6 +55,141 @@ const WardenDashboardLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('campo_sidebar_collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('campo_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+  }, [isCollapsed]);
+
+  const wardenSections = [
+    {
+      title: 'MAIN',
+      items: [
+        {
+          name: 'Dashboard Home',
+          icon: LayoutDashboard,
+          path: '/warden/dashboard',
+          show: true
+        }
+      ]
+    },
+    {
+      title: 'MANAGEMENT',
+      items: [
+        {
+          name: 'Room Changes',
+          icon: BedDouble,
+          path: '/warden/dashboard/room-change-requests',
+          show: true
+        },
+        {
+          name: 'Category Changes',
+          icon: Sliders,
+          path: '/warden/dashboard/category-change-requests',
+          show: true
+        },
+        {
+          name: 'Electricity Bills',
+          icon: Zap,
+          path: '/warden/dashboard/electricity-bills',
+          show: true
+        },
+        {
+          name: 'NOC Management',
+          icon: FileSpreadsheet,
+          path: '/warden/dashboard/noc-management',
+          show: true
+        }
+      ]
+    },
+    {
+      title: 'OPERATIONS',
+      items: [
+        {
+          name: 'Attendance',
+          icon: CalendarCheck,
+          path: '/warden/dashboard/attendance',
+          show: true,
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Mark Attendance',
+              path: '/warden/dashboard/take-attendance',
+              icon: CalendarCheck
+            },
+            {
+              name: 'View Attendance',
+              path: '/warden/dashboard/view-attendance',
+              icon: Users
+            }
+          ]
+        },
+        {
+          name: 'Complaints',
+          icon: TicketCheck,
+          path: '/warden/dashboard/complaints',
+          show: true,
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Raise Complaint',
+              path: '/warden/dashboard/complaints/raise',
+              icon: TicketCheck
+            },
+            {
+              name: 'View Complaints',
+              path: '/warden/dashboard/complaints/view',
+              icon: Users
+            }
+          ]
+        },
+        {
+          name: 'Leaves & Stays',
+          icon: CalendarDays,
+          path: '/warden/dashboard/leave-management',
+          show: true,
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Leaves',
+              path: '/warden/dashboard/leave-management',
+              icon: CalendarDays
+            },
+            {
+              name: 'Apply on Behalf',
+              path: '/warden/dashboard/leave-management/apply-on-behalf',
+              icon: Users
+            },
+            {
+              name: "Stay In's",
+              path: '/warden/dashboard/stay-in-hostel-requests',
+              icon: BedDouble
+            }
+          ]
+        },
+        {
+          name: 'Bulk Outing',
+          icon: Users,
+          path: '/warden/dashboard/bulk-outing',
+          show: true
+        },
+        {
+          name: 'Fee Management',
+          icon: Receipt,
+          path: '/warden/dashboard/fee-management',
+          show: true
+        },
+        {
+          name: 'Notifications',
+          icon: Bell,
+          path: '/warden/dashboard/notifications',
+          show: true
+        }
+      ]
+    }
+  ];
   const [expandedItems, setExpandedItems] = useState(new Set());
   const { pathname } = useLocation();
 
@@ -248,251 +398,30 @@ const WardenDashboardLayout = () => {
 
   return (
       <div className="h-screen flex bg-background overflow-hidden">
-      {/* Mobile Sidebar Backdrop */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden fixed inset-0 bg-black/50 z-[45]"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{
-          x: isSidebarOpen ? 0 : '-100%',
-        }}
-        transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 bottom-0 w-60 lg:w-64 bg-sidebar text-sidebar-text border-r border-sidebar-muted/20 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
+      {/* Mobile Menu Button */}
+      <button
+        onClick={() => setIsSidebarOpen(true)}
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 rounded-lg bg-surface shadow-md border hover:bg-background transition-colors"
+        style={{ borderColor: 'var(--border)' }}
+        aria-label="Open sidebar"
       >
-        {/* Mobile Close Button */}
-        <button
-          onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 text-sidebar-text transition-colors duration-200"
-        >
-          <XMarkIcon className="w-6 h-6" />
-        </button>
+        <Menu className="w-5 h-5 text-sidebar-muted" />
+      </button>
 
-        {/* Header */}
-        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
-          <img
-            src="/campo-logos/campo_logo_transparent_hq.png"
-            alt="Campo Hostel"
-            className="h-8 w-auto object-contain object-left"
-          />
-          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
-            Hostel · Warden Portal
-          </p>
-        </div>
-
-        {/* Navigation */}
-        <div className="flex-1 overflow-hidden">
-          <nav className="h-full px-4 space-y-2 overflow-y-auto scrollbar-sidebar">
-            {menuItems.filter(item => item.show).map((item, index) => (
-              <motion.div
-                key={item.name}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                {item.locked ? (
-                  // Locked item - show as disabled
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-muted/50 cursor-not-allowed opacity-60 select-none">
-                    <div className="relative">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d={item.icon}
-                        />
-                      </svg>
-                    </div>
-                    <span className="flex-1 text-sm font-normal">{item.name}</span>
-                  </div>
-                ) : item.subItems ? (
-                  // Item with sub-items
-                  <div className="space-y-1">
-                    <button
-                      onClick={() => toggleExpanded(item.name)}
-                      className={`flex items-center justify-between w-full px-4 py-3 rounded-lg text-sm font-normal transition-all duration-300 ${pathname.startsWith(item.path)
-                        ? "bg-primary text-white font-semibold shadow-md"
-                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
-                        }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d={item.icon}
-                            />
-                          </svg>
-                        </div>
-                        {item.name}
-                      </div>
-                      <svg
-                        className={`w-4 h-4 transition-transform duration-200 ${expandedItems.has(item.name) ? 'rotate-180' : ''
-                          }`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                    </button>
-                    {/* Sub-items */}
-                    {expandedItems.has(item.name) && (
-                      <div className="ml-6 space-y-1">
-                        {item.subItems.map((subItem, subIndex) => (
-                          <NavLink
-                            key={subItem.name}
-                            to={subItem.path}
-                            className={({ isActive }) =>
-                              `relative overflow-hidden flex items-center gap-3 px-4 py-2 rounded-lg text-xs font-normal transition-all duration-300 ${isActive
-                                ? "bg-primary text-white font-semibold shadow-md"
-                                : "text-sidebar-muted hover:bg-white/10 hover:text-white"
-                              }`
-                            }
-                            end
-                          >
-                            {({ isActive }) => (
-                              <>
-                                <div className="relative z-10">
-                                  <svg
-                                    className="w-3 h-3"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth="2"
-                                      d={subItem.icon}
-                                    />
-                                  </svg>
-                                </div>
-                                <span className="relative z-10">{subItem.name}</span>
-                                {isActive && (
-                                  <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
-                                )}
-                              </>
-                            )}
-                          </NavLink>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  // Active item - normal NavLink
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      `relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-normal transition-all duration-300 ${isActive
-                        ? "bg-primary text-white shadow-md font-semibold"
-                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
-                      }`
-                    }
-                    end
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <div className="relative z-10">
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d={item.icon}
-                            />
-                          </svg>
-                        </div>
-                        <span className="relative z-10">{item.name}</span>
-                        {isActive && (
-                          <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
-                        )}
-                      </>
-                    )}
-                  </NavLink>
-                )}
-              </motion.div>
-            ))}
-          </nav>
-          {/* Bottom padding for scroll space */}
-          <div className="h-4"></div>
-        </div>
-
-        {/* User Profile and Logout */}
-        <div className="p-4 border-t border-sidebar-muted/20 flex-shrink-0">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-md">
-              {(user?.name || user?.username) ? (user?.name || user?.username).charAt(0).toUpperCase() : 'W'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-sidebar-text truncate" title={user?.name || user?.username || 'Warden'}>
-                {user?.name || user?.username || 'Warden'}
-              </div>
-              <div className="text-xs text-sidebar-muted truncate" title={user?.assignedHostel?.name || user?.hostelType || 'Warden'}>
-                {user?.assignedHostel?.name
-                  || (user?.hostelType === 'boys' ? 'Boys Hostel' : user?.hostelType === 'girls' ? 'Girls Hostel' : null)
-                  || 'Warden'}
-              </div>
-            </div>
-          </div>
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-normal text-white bg-primary hover:bg-primary-hover rounded-lg transition-all duration-300 shadow hover:shadow-md"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-            Logout
-          </motion.button>
-        </div>
-      </motion.aside>
+      {/* Enterprise Campo Sidebar */}
+      <CampoSidebar
+        sections={wardenSections}
+        moduleSubtitle="Hostel · Warden Portal"
+        user={user}
+        onLogout={handleLogout}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
+        isMobileOpen={isSidebarOpen}
+        setIsMobileOpen={setIsSidebarOpen}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-background">
+      <main className={`flex-1 overflow-y-auto flex flex-col min-h-0 bg-background transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <header className="lg:hidden sticky top-0 z-40 h-14 flex-shrink-0 relative bg-surface/95 backdrop-blur-sm border-b border-border shadow-sm flex items-center px-3">
           <button
             type="button"

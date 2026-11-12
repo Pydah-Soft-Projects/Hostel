@@ -10,6 +10,17 @@ import {
 } from '@heroicons/react/24/outline';
 import NotificationBell from '../../components/NotificationBell';
 import ResetPasswordModal from '../admin/ResetPasswordModal';
+import CampoSidebar from '../../components/CampoSidebar';
+import {
+  LayoutDashboard,
+  CalendarCheck,
+  Users,
+  TicketCheck,
+  CalendarDays,
+  BedDouble,
+  FileSpreadsheet,
+  Menu
+} from 'lucide-react';
 
 // Helper function to get course name consistently
 const getCourseName = (course) => {
@@ -69,6 +80,73 @@ const PrincipalDashboard = () => {
   });
   // Removed notificationCount state - NotificationBell component handles notifications
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('campo_sidebar_collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('campo_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+  }, [isCollapsed]);
+
+  const principalSections = [
+    {
+      title: 'MAIN',
+      items: [
+        {
+          name: 'Dashboard Home',
+          icon: LayoutDashboard,
+          path: '/principal/dashboard',
+          show: hasPageAccess('dashboard_home')
+        }
+      ]
+    },
+    {
+      title: 'MANAGEMENT & OVERSIGHT',
+      items: [
+        {
+          name: 'Students',
+          icon: Users,
+          path: '/principal/dashboard/students',
+          show: hasPageAccess('students')
+        },
+        {
+          name: 'Reports',
+          icon: FileSpreadsheet,
+          path: '/principal/dashboard/reports',
+          show: hasPageAccess('reports')
+        }
+      ]
+    },
+    {
+      title: 'OPERATIONS',
+      items: [
+        {
+          name: 'Attendance',
+          icon: CalendarCheck,
+          path: '/principal/dashboard/attendance',
+          show: hasPageAccess('attendance')
+        },
+        {
+          name: 'Complaints',
+          icon: TicketCheck,
+          path: '/principal/dashboard/complaints',
+          show: hasPageAccess('complaints')
+        },
+        {
+          name: 'Leaves',
+          icon: CalendarDays,
+          path: '/principal/dashboard/leave-management',
+          show: hasPageAccess('leaves')
+        },
+        {
+          name: 'Stay in Requests',
+          icon: BedDouble,
+          path: '/principal/dashboard/stay-in-hostel-requests',
+          show: hasPageAccess('stay_in_requests')
+        }
+      ]
+    }
+  ];
   const [notificationStates, setNotificationStates] = useState({
     complaint: false,
     announcement: false,
@@ -186,241 +264,28 @@ const PrincipalDashboard = () => {
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-surface shadow-lg hover:bg-background transition-colors duration-200"
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 rounded-lg bg-surface shadow-md border hover:bg-background transition-colors"
+        style={{ borderColor: 'var(--border)' }}
+        aria-label="Open sidebar"
       >
-        <Bars3Icon className="w-6 h-6 text-gray-600" />
+        <Menu className="w-5 h-5 text-sidebar-muted" />
       </button>
 
-      {/* Mobile Sidebar Backdrop */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden fixed inset-0 bg-black/50 z-40"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{
-          x: isSidebarOpen ? 0 : '-100%',
-        }}
-        transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 bottom-0 w-56 bg-sidebar text-sidebar-text border-r border-sidebar-muted/20 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
-      >
-        {/* Mobile Close Button */}
-        <button
-          onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 text-sidebar-text transition-colors duration-200"
-        >
-          <XMarkIcon className="w-6 h-6" />
-        </button>
-
-        {/* Header */}
-        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
-          <img
-            src="/campo-logos/campo_logo_transparent_hq.png"
-            alt="Campo Hostel"
-            className="h-8 w-auto object-contain object-left"
-          />
-          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
-            {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
-              ? (user.assignedCollegeDetails.length > 1
-                ? `${user.assignedCollegeDetails.length} Colleges`
-                : user.assignedCollegeDetails[0].name)
-              : 'Hostel · Principal Portal'}
-          </p>
-        </div>
-
-        {/* Navigation */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Top fade indicator */}
-          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
-            id="top-fade"></div>
-
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-sidebar"
-            onScroll={(e) => {
-              const target = e.target;
-              const topFade = document.getElementById('top-fade');
-              const bottomFade = document.getElementById('bottom-fade');
-
-              if (topFade && bottomFade) {
-                // Show top fade when scrolled down
-                topFade.style.opacity = target.scrollTop > 10 ? '1' : '0';
-
-                // Show bottom fade when not at bottom
-                const isAtBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 5;
-                bottomFade.style.opacity = isAtBottom ? '0' : '1';
-              }
-            }}>
-            {menuItems.filter(item => item.show).map((item, index) => (
-              <motion.div
-                key={item.name}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                {item.locked ? (
-                  // Locked item - show as disabled (icon + faded label only)
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-muted/50 cursor-not-allowed opacity-60 select-none">
-                    <div className="relative">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d={item.icon}
-                        />
-                      </svg>
-                    </div>
-                    <span className="flex-1 text-sm font-normal">{item.name}</span>
-                  </div>
-                ) : (
-                  // Active item - normal NavLink
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      `relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-normal transition-all duration-300 ${isActive
-                        ? "bg-primary text-white shadow-md font-semibold"
-                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
-                      }`
-                    }
-                    end
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <div className="relative z-10">
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d={item.icon}
-                            />
-                          </svg>
-                          {item.notificationType && notificationStates[item.notificationType] && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
-                            >
-                              <motion.div
-                                animate={{
-                                  scale: [1, 1.2, 1],
-                                  opacity: [1, 0.5, 1]
-                                }}
-                                transition={{
-                                  duration: 1.5,
-                                  repeat: Infinity,
-                                  ease: "easeInOut"
-                                }}
-                                className="w-full h-full bg-red-500 rounded-full"
-                              />
-                            </motion.div>
-                          )}
-                        </div>
-                        <span className="relative z-10">{item.name}</span>
-                        {isActive && (
-                          <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
-                        )}
-                      </>
-                    )}
-                  </NavLink>
-                )}
-              </motion.div>
-            ))}
-          </nav>
-
-          {/* Bottom fade indicator */}
-          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
-            id="bottom-fade"></div>
-        </div>
-
-        {/* User Profile and Logout */}
-        <div className="p-4 border-t border-sidebar-muted/20 flex-shrink-0">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
-              {(user?.name || user?.username) ? (user?.name || user?.username).charAt(0).toUpperCase() : 'P'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs lg:text-sm font-semibold text-sidebar-text truncate" title={user?.name || user?.username || 'Principal'}>
-                {user?.name || user?.username || 'Principal'}
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="text-[10px] text-sidebar-muted truncate max-w-[120px]" title={user?.assignedCollegeDetails?.map(c => c.name).join(', ') || 'Principal'}>
-                  {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
-                    ? (user.assignedCollegeDetails.length > 1
-                      ? `${user.assignedCollegeDetails.length} Colleges`
-                      : user.assignedCollegeDetails[0].name)
-                    : 'Principal'}
-                </div>
-                {/* Password Reset Icon */}
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowResetPasswordModal(true)}
-                  className="p-1.5 hover:text-primary-light hover:bg-white/10 rounded-full transition-all duration-200"
-                  title="Reset Password"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                    />
-                  </svg>
-                </motion.button>
-              </div>
-            </div>
-          </div>
-
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-primary hover:bg-primary-hover rounded-lg transition-all duration-300 shadow hover:shadow-md"
-          >
-            <svg
-              className="w-3 h-3 lg:w-4 lg:h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-            Logout
-          </motion.button>
-        </div>
-      </motion.aside>
+      {/* Enterprise Campo Sidebar */}
+      <CampoSidebar
+        sections={principalSections}
+        moduleSubtitle="Hostel · Principal Portal"
+        user={user}
+        onLogout={handleLogout}
+        onResetPassword={() => setShowResetPasswordModal(true)}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
+        isMobileOpen={isSidebarOpen}
+        setIsMobileOpen={setIsSidebarOpen}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className={`flex-1 overflow-y-auto transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <div className="mx-auto p-4 lg:p-8">
           <div className="flex justify-end mb-4">
             <NotificationBell />

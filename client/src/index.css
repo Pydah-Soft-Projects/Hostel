@@ -78,27 +78,27 @@
     background: #94a3b8;
   }
 
-  /* Dedicated theme sidebar scrollbar */
-  .scrollbar-sidebar {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  /* Completely hide scrollbars while maintaining full scrollability */
+  #sidebar::-webkit-scrollbar,
+  #sidebar nav::-webkit-scrollbar,
+  #sidebar *::-webkit-scrollbar,
+  .scrollbar-sidebar::-webkit-scrollbar,
+  .scrollbar-hide::-webkit-scrollbar,
+  .no-scrollbar::-webkit-scrollbar,
+  .scrollbar-none::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
   }
 
-  .scrollbar-sidebar::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  .scrollbar-sidebar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-sidebar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 9999px;
-  }
-
-  .scrollbar-sidebar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.35);
+  #sidebar,
+  #sidebar nav,
+  .scrollbar-sidebar,
+  .scrollbar-hide,
+  .no-scrollbar,
+  .scrollbar-none {
+    -ms-overflow-style: none !important; /* IE and Edge */
+    scrollbar-width: none !important; /* Firefox */
   }
 
   /* Student dashboard scrollbar */
