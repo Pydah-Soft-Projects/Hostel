@@ -322,7 +322,7 @@ const CategoryChangesPanel = ({ mode = 'admin' }) => {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Squares2X2Icon className="w-5 h-5 text-indigo-600" />
+              <Squares2X2Icon className="w-5 h-5 text-primary" />
               Category Change Requests
             </h2>
             <p className="text-sm text-gray-500 mt-1">
@@ -332,7 +332,7 @@ const CategoryChangesPanel = ({ mode = 'admin' }) => {
           <button
             type="button"
             onClick={openRaise}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
           >
             <PlusIcon className="w-4 h-4" />
             Raise Category Change
@@ -546,7 +546,7 @@ const CategoryChangesPanel = ({ mode = 'admin' }) => {
                         <button
                           type="button"
                           onClick={() => pickStudent(s)}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-primary-light"
                         >
                           <span className="font-medium">{s.name || '—'}</span>
                           <span className="text-gray-500 text-xs ml-2">
@@ -601,12 +601,12 @@ const CategoryChangesPanel = ({ mode = 'admin' }) => {
               </div>
 
               {form.toCategoryId && (
-                <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-xs">
+                <div className="rounded-lg border border-border bg-primary-light/50 p-3 text-xs">
                   {loadingFeePreview ? (
                     <p className="text-gray-500">Calculating new fee…</p>
                   ) : feePreview ? (
                     <>
-                      <p className="font-semibold text-indigo-900">Fee preview</p>
+                      <p className="font-semibold text-primary">Fee preview</p>
                       <p className="text-gray-700 mt-1">
                         {fmtFee(feePreview.previousTotalFee)} →{' '}
                         <strong>{fmtFee(feePreview.newTotalFee)}</strong> ({feePreview.categoryName})
@@ -688,7 +688,7 @@ const CategoryChangesPanel = ({ mode = 'admin' }) => {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
                 >
                   {submitting ? 'Submitting…' : 'Submit for approval'}
                 </button>

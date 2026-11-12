@@ -182,11 +182,11 @@ const PrincipalDashboard = () => {
   ];
 
   return (
-    <div className="h-screen flex bg-gradient-to-br from-purple-50 via-white to-purple-50">
+    <div className="h-screen flex bg-background">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white shadow-lg hover:bg-gray-50 transition-colors duration-200"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-surface shadow-lg hover:bg-background transition-colors duration-200"
       >
         <Bars3Icon className="w-6 h-6 text-gray-600" />
       </button>
@@ -211,46 +211,39 @@ const PrincipalDashboard = () => {
           x: isSidebarOpen ? 0 : '-100%',
         }}
         transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 bottom-0 w-56 bg-white border-r border-purple-100 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
+        className="fixed lg:relative top-0 left-0 bottom-0 w-56 bg-sidebar text-sidebar-text border-r border-sidebar-muted/20 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
       >
         {/* Mobile Close Button */}
         <button
           onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 text-sidebar-text transition-colors duration-200"
         >
-          <XMarkIcon className="w-6 h-6 text-gray-600" />
+          <XMarkIcon className="w-6 h-6" />
         </button>
 
         {/* Header */}
-        <div className="p-4 flex-shrink-0">
-          <div className="bg-gradient-to-r from-purple-600 to-purple-800 text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
-            <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
-              <svg className="w-4 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h1 className="font-semibold text-xs">Principal Portal</h1>
-              <p className="text-xs text-purple-100 truncate">
-                {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
-                  ? (user.assignedCollegeDetails.length > 1
-                    ? `${user.assignedCollegeDetails.length} Colleges`
-                    : user.assignedCollegeDetails[0].name)
-                  : 'College Management'}
-              </p>
-            </div>
-          </div>
+        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
+          <img
+            src="/campo-logos/campo_logo_transparent_hq.png"
+            alt="Campo Hostel"
+            className="h-8 w-auto object-contain object-left"
+          />
+          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
+            {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
+              ? (user.assignedCollegeDetails.length > 1
+                ? `${user.assignedCollegeDetails.length} Colleges`
+                : user.assignedCollegeDetails[0].name)
+              : 'Hostel · Principal Portal'}
+          </p>
         </div>
 
         {/* Navigation */}
         <div className="flex-1 flex flex-col min-h-0">
           {/* Top fade indicator */}
-          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-white to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
+          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
             id="top-fade"></div>
 
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-visible"
+          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-sidebar"
             onScroll={(e) => {
               const target = e.target;
               const topFade = document.getElementById('top-fade');
@@ -274,7 +267,7 @@ const PrincipalDashboard = () => {
               >
                 {item.locked ? (
                   // Locked item - show as disabled (icon + faded label only)
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 cursor-not-allowed opacity-60 select-none">
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-muted/50 cursor-not-allowed opacity-60 select-none">
                     <div className="relative">
                       <svg
                         className="w-4 h-4"
@@ -297,49 +290,56 @@ const PrincipalDashboard = () => {
                   <NavLink
                     to={item.path}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-normal transition-all duration-300 ${isActive
-                        ? "bg-purple-50 text-purple-700 shadow-sm"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      `relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-normal transition-all duration-300 ${isActive
+                        ? "bg-primary text-white shadow-md font-semibold"
+                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
                       }`
                     }
                     end
                   >
-                    <div className="relative">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d={item.icon}
-                        />
-                      </svg>
-                      {item.notificationType && notificationStates[item.notificationType] && (
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
-                        >
-                          <motion.div
-                            animate={{
-                              scale: [1, 1.2, 1],
-                              opacity: [1, 0.5, 1]
-                            }}
-                            transition={{
-                              duration: 1.5,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                            className="w-full h-full bg-red-500 rounded-full"
-                          />
-                        </motion.div>
-                      )}
-                    </div>
-                    {item.name}
+                    {({ isActive }) => (
+                      <>
+                        <div className="relative z-10">
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d={item.icon}
+                            />
+                          </svg>
+                          {item.notificationType && notificationStates[item.notificationType] && (
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
+                            >
+                              <motion.div
+                                animate={{
+                                  scale: [1, 1.2, 1],
+                                  opacity: [1, 0.5, 1]
+                                }}
+                                transition={{
+                                  duration: 1.5,
+                                  repeat: Infinity,
+                                  ease: "easeInOut"
+                                }}
+                                className="w-full h-full bg-red-500 rounded-full"
+                              />
+                            </motion.div>
+                          )}
+                        </div>
+                        <span className="relative z-10">{item.name}</span>
+                        {isActive && (
+                          <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
+                        )}
+                      </>
+                    )}
                   </NavLink>
                 )}
               </motion.div>
@@ -347,22 +347,22 @@ const PrincipalDashboard = () => {
           </nav>
 
           {/* Bottom fade indicator */}
-          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-white to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
+          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
             id="bottom-fade"></div>
         </div>
 
         {/* User Profile and Logout */}
-        <div className="p-4 border-t border-gray-100 flex-shrink-0">
+        <div className="p-4 border-t border-sidebar-muted/20 flex-shrink-0">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
+            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
               {(user?.name || user?.username) ? (user?.name || user?.username).charAt(0).toUpperCase() : 'P'}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs lg:text-sm font-semibold text-gray-900 truncate" title={user?.name || user?.username || 'Principal'}>
+              <div className="text-xs lg:text-sm font-semibold text-sidebar-text truncate" title={user?.name || user?.username || 'Principal'}>
                 {user?.name || user?.username || 'Principal'}
               </div>
               <div className="flex items-center justify-between">
-                <div className="text-[10px] text-gray-500 truncate max-w-[120px]" title={user?.assignedCollegeDetails?.map(c => c.name).join(', ') || 'Principal'}>
+                <div className="text-[10px] text-sidebar-muted truncate max-w-[120px]" title={user?.assignedCollegeDetails?.map(c => c.name).join(', ') || 'Principal'}>
                   {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
                     ? (user.assignedCollegeDetails.length > 1
                       ? `${user.assignedCollegeDetails.length} Colleges`
@@ -374,7 +374,7 @@ const PrincipalDashboard = () => {
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setShowResetPasswordModal(true)}
-                  className="p-1.5 hover:text-orange-600 hover:bg-orange-50 rounded-full transition-all duration-200"
+                  className="p-1.5 hover:text-primary-light hover:bg-white/10 rounded-full transition-all duration-200"
                   title="Reset Password"
                 >
                   <svg
@@ -399,7 +399,7 @@ const PrincipalDashboard = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-all duration-300 shadow hover:shadow-md"
+            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-primary hover:bg-primary-hover rounded-lg transition-all duration-300 shadow hover:shadow-md"
           >
             <svg
               className="w-3 h-3 lg:w-4 lg:h-4"

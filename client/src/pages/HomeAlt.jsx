@@ -123,8 +123,7 @@ const HomeAlt = () => {
         {/* Left: Text */}
         <div className="flex-1 max-w-xl text-left z-10 mb-10 md:mb-0">
           <h1 className="font-display text-4xl sm:text-5xl md:text-7xl font-bold mb-6 text-white leading-[1.1]">
-            HOSTEL<br />
-            CONNECTIFY
+            CAMPO HOSTEL
           </h1>
           <p className="text-lg sm:text-xl md:text-2xl mb-8 sm:mb-10 font-light text-blue-100 max-w-2xl leading-relaxed">
             Transforming hostel communication with a modern, transparent, and efficient digital platform.
@@ -215,11 +214,14 @@ const HomeAlt = () => {
                 </div>
               );
             })}
-            {/* Center label (replace with logo placeholder) */}
+            {/* Center label */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-              <div className="bg-white rounded-full shadow-lg flex items-center justify-center" style={{ width: 64, height: 64 }}>
-                {/* Replace with your logo image below if available */}
-                <span className="text-blue-700 font-bold text-lg select-none">LOGO</span>
+              <div className="bg-white rounded-full shadow-lg flex items-center justify-center p-2" style={{ width: 64, height: 64 }}>
+                <img
+                  src="/campo-logos/icon-192.png"
+                  alt="Campo Hostel Logo"
+                  className="w-full h-full object-contain rounded-full"
+                />
               </div>
             </div>
           </div>

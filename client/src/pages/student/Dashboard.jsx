@@ -43,6 +43,23 @@ import FAQ from './FAQ';
 import useFeatureToggles from '../../hooks/useFeatureToggles';
 import FeatureProtectedRoute from '../../components/FeatureProtectedRoute';
 import FloatingCallButton from '../../components/FloatingCallButton';
+import CampoSidebar from '../../components/CampoSidebar';
+import {
+  LayoutDashboard,
+  PlusCircle,
+  TicketCheck,
+  CalendarCheck,
+  CalendarDays,
+  Search,
+  Receipt,
+  FileText,
+  FileSpreadsheet,
+  Bell,
+  Vote,
+  User,
+  HelpCircle,
+  Menu
+} from 'lucide-react';
 
 const navItems = [
   {
@@ -150,6 +167,118 @@ const StudentDashboardLayout = () => {
     responseTime: 0,
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('campo_sidebar_collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('campo_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+  }, [isCollapsed]);
+
+  const studentSections = [
+    {
+      title: 'MAIN',
+      items: [
+        {
+          name: 'Overview',
+          path: '/student',
+          icon: LayoutDashboard,
+          show: !featureToggles || isFeatureEnabled('overview')
+        }
+      ]
+    },
+    {
+      title: 'STUDENT SERVICES',
+      items: [
+        {
+          name: 'Raise Complaint',
+          path: '/student/raise',
+          icon: PlusCircle,
+          show: !featureToggles || isFeatureEnabled('raiseComplaint')
+        },
+        {
+          name: 'My Complaints',
+          path: '/student/my-complaints',
+          icon: TicketCheck,
+          hasNotification: notificationStates.complaint,
+          show: !featureToggles || isFeatureEnabled('myComplaints')
+        },
+        {
+          name: 'Attendance',
+          path: '/student/attendance',
+          icon: CalendarCheck,
+          show: !featureToggles || isFeatureEnabled('attendance')
+        },
+        {
+          name: 'Leave',
+          path: '/student/leave',
+          icon: CalendarDays,
+          show: !featureToggles || isFeatureEnabled('leave')
+        },
+        {
+          name: 'Found & Lost',
+          path: '/student/foundlost',
+          icon: Search,
+          show: !featureToggles || isFeatureEnabled('foundLost')
+        }
+      ]
+    },
+    {
+      title: 'FINANCE',
+      items: [
+        {
+          name: 'Hostel Fee',
+          path: '/student/hostel-fee',
+          icon: Receipt,
+          hasNotification: notificationStates.fee_reminder,
+          show: !featureToggles || isFeatureEnabled('hostelFee')
+        },
+        {
+          name: 'Payment History',
+          path: '/student/payment-history',
+          icon: FileText,
+          show: !featureToggles || isFeatureEnabled('paymentHistory')
+        }
+      ]
+    },
+    {
+      title: 'COMMUNITY & SUPPORT',
+      items: [
+        {
+          name: 'NOC Requests',
+          path: '/student/noc-requests',
+          icon: FileSpreadsheet,
+          show: !featureToggles || isFeatureEnabled('nocRequests')
+        },
+        {
+          name: 'Announcements',
+          path: '/student/announcements',
+          icon: Bell,
+          hasNotification: notificationStates.announcement,
+          show: !featureToggles || isFeatureEnabled('announcements')
+        },
+        {
+          name: 'Polls',
+          path: '/student/polls',
+          icon: Vote,
+          hasNotification: notificationStates.poll,
+          show: !featureToggles || isFeatureEnabled('polls')
+        },
+        {
+          name: 'Profile',
+          path: '/student/profile',
+          icon: User,
+          show: !featureToggles || isFeatureEnabled('profile')
+        },
+        {
+          name: 'FAQ',
+          path: '/student/faq',
+          icon: HelpCircle,
+          show: true
+        }
+      ]
+    }
+  ];
   const [unvotedPolls, setUnvotedPolls] = useState([]);
   const [currentPollIndex, setCurrentPollIndex] = useState(0);
   const [complaintsAwaitingFeedback, setComplaintsAwaitingFeedback] = useState([]);
@@ -299,176 +428,39 @@ const StudentDashboardLayout = () => {
   }
 
   return (
-    <div className="h-screen flex bg-gradient-to-br from-blue-50 via-white to-blue-50 overflow-hidden">
+    <div className="h-screen flex bg-background overflow-hidden">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="lg:hidden fixed top-3 left-3 z-50 p-2.5 rounded-lg bg-white shadow-lg hover:bg-gray-50 transition-colors duration-200 touch-manipulation"
+        className="lg:hidden fixed top-3 left-3 z-50 p-2.5 rounded-lg bg-surface shadow-lg hover:bg-background transition-colors duration-200 touch-manipulation"
       >
         <Bars3Icon className="w-5 h-5 text-gray-600" />
       </button>
 
-      {/* Mobile Sidebar Backdrop */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden fixed inset-0 bg-black/50 z-40"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{
-          x: isSidebarOpen ? 0 : '-100%',
-        }}
-        transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 w-64 sm:w-72 h-screen bg-gradient-to-b from-blue-900 to-blue-800 border-r border-blue-700 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none rounded-tr-3xl rounded-br-3xl"
+      {/* Mobile Menu Button */}
+      <button
+        onClick={() => setIsSidebarOpen(true)}
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 rounded-lg bg-surface shadow-md border hover:bg-background transition-colors"
+        style={{ borderColor: 'var(--border)' }}
+        aria-label="Open sidebar"
       >
-        {/* Mobile Close Button */}
-        <button
-          onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-3 right-3 p-2.5 rounded-lg hover:bg-white/10 transition-colors duration-200 touch-manipulation"
-        >
-          <XMarkIcon className="w-5 h-5 text-white" />
-        </button>
+        <Menu className="w-5 h-5 text-sidebar-muted" />
+      </button>
 
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="p-4 sm:p-6 font-bold text-lg sm:text-xl tracking-wide flex items-center gap-2 flex-shrink-0"
-        >
-          <svg
-            className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-300"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-            />
-          </svg>
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 to-white">
-            Student Portal
-          </span>
-        </motion.div>
-
-        <nav className="flex-1 px-3 sm:px-4 space-y-1 sm:space-y-2 mt-4 overflow-y-auto scrollbar-visible-blue">
-          {navItems
-            .filter(item => !item.feature || isFeatureEnabled(item.feature))
-            .map((item, index) => (
-              <motion.div
-                key={item.path}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <NavLink
-                  to={item.path}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2.5 sm:py-3 rounded-lg text-sm sm:text-sm font-medium transition-all duration-300 touch-manipulation ${isActive
-                      ? "bg-white/10 text-white shadow-lg font-semibold"
-                      : "text-white/90 hover:bg-white/10 hover:text-white hover:shadow-md"
-                    }`
-                  }
-                  end
-                >
-                  <div className="relative">
-                    <svg
-                      className="w-4 h-4 sm:w-5 sm:h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d={item.icon}
-                      />
-                    </svg>
-                    {item.notificationType && notificationStates[item.notificationType] && (
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
-                      >
-                        <motion.div
-                          animate={{
-                            scale: [1, 1.2, 1],
-                            opacity: [1, 0.5, 1]
-                          }}
-                          transition={{
-                            duration: 1.5,
-                            repeat: Infinity,
-                            ease: "easeInOut"
-                          }}
-                          className="w-full h-full bg-red-500 rounded-full"
-                        />
-                      </motion.div>
-                    )}
-                  </div>
-                  <span className="truncate">{item.name}</span>
-                </NavLink>
-              </motion.div>
-            ))}
-        </nav>
-
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="p-4 sm:p-6 border-t border-blue-700/50 bg-blue-900/30 flex-shrink-0 rounded-br-3xl"
-        >
-          <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-            <motion.div
-              whileHover={{ scale: 1.1 }}
-              className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-cyan-300 to-blue-500 flex items-center justify-center text-blue-900 font-bold shadow-md"
-            >
-              {user?.name?.charAt(0).toUpperCase()}
-            </motion.div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs sm:text-xs font-semibold text-white truncate">
-                {user?.name}
-              </div>
-              <div className="text-xs sm:text-xs text-cyan-200/90 truncate">
-                {user?.rollNumber}
-              </div>
-            </div>
-          </div>
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 sm:py-2 text-xs sm:text-xs font-medium text-white bg-blue-700/50 hover:bg-blue-600 rounded-lg transition-all duration-300 shadow hover:shadow-md touch-manipulation"
-          >
-            <svg
-              className="w-4 h-4 sm:w-5 sm:h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-            Logout
-          </motion.button>
-        </motion.div>
-      </motion.aside>
+      {/* Enterprise Campo Sidebar */}
+      <CampoSidebar
+        sections={studentSections}
+        moduleSubtitle="Hostel · Student Portal"
+        user={user}
+        onLogout={handleLogout}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
+        isMobileOpen={isSidebarOpen}
+        setIsMobileOpen={setIsSidebarOpen}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto h-screen scrollbar-visible">
+      <main className={`flex-1 overflow-y-auto h-screen scrollbar-visible transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <div className="max-w-7xl mx-auto p-3 sm:p-4 lg:p-8">
           <div className="flex justify-end mb-3 sm:mb-4">
             <NotificationBell />

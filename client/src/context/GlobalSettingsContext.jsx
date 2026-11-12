@@ -20,13 +20,13 @@ export const GlobalSettingsProvider = ({ children }) => {
   // Default fallback settings
   const defaultSettings = {
     institution: {
-      name: "Pydah",
-      shortName: "Pydah Hostel",
-      fullName: "Pydah Educational Institutions",
+      name: "Campo",
+      shortName: "Campo Hostel",
+      fullName: "Campo Educational Institutions",
       type: "Educational Institution",
-      description: "Digital hostel management system for Pydah Educational Institutions",
+      description: "Digital hostel management system for Campo Educational Institutions",
       address: {
-        street: "Pydah Campus",
+        street: "Campo Campus",
         city: "Visakhapatnam",
         state: "Andhra Pradesh",
         pincode: "530040",
@@ -46,11 +46,11 @@ export const GlobalSettingsProvider = ({ children }) => {
       supportUrl: "https://support.pydahsoft.in"
     },
     seo: {
-      title: "Pydah Hostel Management System",
-      description: "Digital hostel management system for Pydah Educational Institutions",
-      keywords: "Pydah Hostel, Hostel Management, Student Portal, Digital Hostel",
-      author: "Pydah Educational Institutions",
-      ogImage: "https://hms.pydahsoft.in/og-image.jpg"
+      title: "Campo Hostel Management System",
+      description: "Digital hostel management system for Campo Educational Institutions",
+      keywords: "Campo Hostel, Hostel Management, Student Portal, Digital Hostel",
+      author: "Campo Educational Institutions",
+      ogImage: "https://hms.pydahsoft.in/campo-logos/og-image.png"
     },
     pydahsoft: {
       companyName: "PydahSoft",

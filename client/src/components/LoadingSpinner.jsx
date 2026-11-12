@@ -21,7 +21,7 @@ const LoadingSpinner = ({ size = 'md', className = '' }) => {
         <motion.div
           animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          className={`${dotSizes[size]} bg-blue-600 rounded-full blur-[1px] shadow-[0_0_15px_rgba(37,99,235,0.6)]`}
+          className={`${dotSizes[size]} bg-primary rounded-full blur-[1px] shadow-[0_0_15px_rgba(var(--primary-rgb),0.6)]`}
         />
 
         {/* Orbiting Dots */}
@@ -34,11 +34,11 @@ const LoadingSpinner = ({ size = 'md', className = '' }) => {
             style={{ rotate: offset }}
           >
             <motion.div
-              className={`absolute top-0 left-1/2 -translate-x-1/2 ${dotSizes[size]} bg-blue-${500 - i * 100} rounded-full`}
+              className={`absolute top-0 left-1/2 -translate-x-1/2 ${dotSizes[size]} bg-primary rounded-full`}
               animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.6, 1, 0.6] }}
               transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
               style={{
-                boxShadow: `0 0 12px rgba(59, 130, 246, 0.5)`,
+                boxShadow: `0 0 12px rgba(var(--primary-rgb), 0.5)`,
               }}
             />
           </motion.div>
@@ -48,7 +48,7 @@ const LoadingSpinner = ({ size = 'md', className = '' }) => {
         <motion.div
           animate={{ rotate: -360 }}
           transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-          className="absolute inset-0 border border-blue-500/10 rounded-full"
+          className="absolute inset-0 border border-primary/20 rounded-full"
         />
       </div>
 
@@ -57,7 +57,7 @@ const LoadingSpinner = ({ size = 'md', className = '' }) => {
           initial={{ opacity: 0 }}
           animate={{ opacity: [0, 1, 0] }}
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          className="mt-4 text-blue-600/60 font-medium text-[10px] tracking-[0.3em] uppercase"
+          className="mt-4 text-primary/70 font-medium text-[10px] tracking-[0.3em] uppercase"
         >
           Processing
         </motion.p>

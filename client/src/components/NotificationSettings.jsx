@@ -121,7 +121,7 @@ const NotificationSettings = () => {
 
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div className="flex items-center">
-              <div className="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
+              <div className="w-3 h-3 bg-primary rounded-full mr-3"></div>
               <span className="text-sm font-medium text-gray-700">Legacy System</span>
             </div>
             <div className="flex items-center">
@@ -151,7 +151,7 @@ const NotificationSettings = () => {
           <button
             onClick={handleRequestPermission}
             disabled={isLoading || isRequestingPermission}
-            className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center justify-center px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isRequestingPermission ? (
               <>
@@ -208,9 +208,9 @@ const NotificationSettings = () => {
             </div>
           </div>
 
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <h5 className="text-sm font-medium text-blue-900 mb-2">About This System</h5>
-            <p className="text-xs text-blue-700">
+          <div className="mt-4 p-3 bg-primary-light/40 border border-border rounded-lg">
+            <h5 className="text-sm font-medium text-primary mb-2">About This System</h5>
+            <p className="text-xs text-text-sub">
               This notification system uses a hybrid approach with OneSignal for enhanced push notifications 
               and a legacy system as fallback. Real-time notifications are handled via WebSocket connections.
             </p>

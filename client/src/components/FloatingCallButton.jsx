@@ -51,7 +51,7 @@ const FloatingCallButton = ({ isSidebarOpen = false }) => {
         subtitle: wardenSubtitle,
         phone: wardenPhone,
         icon: HomeIcon,
-        color: 'bg-blue-500'
+        color: 'bg-primary'
       },
       {
         id: 'ao',
@@ -98,9 +98,9 @@ const FloatingCallButton = ({ isSidebarOpen = false }) => {
       
       {/* Call Options Popup */}
       {isOpen && (
-        <div className="absolute bottom-16 left-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] z-[10000]">
-          <div className="text-center border-b border-gray-200 pb-3 mb-4">
-            <h3 className="font-bold text-gray-800 text-lg">Quick Call</h3>
+        <div className="absolute bottom-16 left-0 mb-2 bg-surface rounded-xl shadow-2xl border border-border p-4 min-w-[280px] z-[10000]">
+          <div className="text-center border-b border-border pb-3 mb-4">
+            <h3 className="font-bold text-text-main text-lg">Quick Call</h3>
           </div>
           
           <div className="space-y-3">
@@ -109,7 +109,7 @@ const FloatingCallButton = ({ isSidebarOpen = false }) => {
               return (
                 <div
                   key={option.id}
-                  className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors group"
+                  className="flex items-center gap-4 p-3 rounded-lg hover:bg-background cursor-pointer transition-colors group"
                   onClick={() => {
                     console.log('Calling:', option.phone);
                     handleCall(option.phone);
@@ -119,10 +119,10 @@ const FloatingCallButton = ({ isSidebarOpen = false }) => {
                     <IconComponent className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex-1">
-                    <div className="font-semibold text-gray-900 text-sm">{option.title}</div>
-                    <div className="text-xs text-gray-600">{option.subtitle}</div>
+                    <div className="font-semibold text-text-main text-sm">{option.title}</div>
+                    <div className="text-xs text-text-sub">{option.subtitle}</div>
                   </div>
-                  <PhoneIcon className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                  <PhoneIcon className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors" />
                 </div>
               );
             })}
@@ -135,8 +135,8 @@ const FloatingCallButton = ({ isSidebarOpen = false }) => {
         onClick={toggleMenu}
         className={`w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all duration-200 border-2 animate-pulse ${
           isOpen 
-            ? 'bg-red-500 hover:bg-red-600 border-red-300' 
-            : 'bg-blue-500 hover:bg-blue-600 border-blue-300'
+            ? 'bg-danger hover:opacity-90 border-red-300' 
+            : 'bg-primary hover:bg-primary-hover border-primary-light'
         }`}
         style={{ 
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',

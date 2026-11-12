@@ -381,15 +381,15 @@ const PrincipalHome = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl shadow-lg p-4 sm:p-6 mb-6"
+          className="bg-surface border border-border rounded-xl shadow-md p-4 sm:p-6 mb-6"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <AcademicCapIcon className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
-                <span className="bg-gradient-to-r from-purple-900 to-purple-700 text-transparent bg-clip-text">Principal Dashboard</span>
+              <h1 className="text-xl sm:text-2xl font-bold text-primary flex items-center gap-2">
+                <AcademicCapIcon className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+                <span>Principal Dashboard</span>
               </h1>
-              <p className="text-gray-600 mt-1 text-xs sm:text-sm">
+              <p className="text-text-sub mt-1 text-xs sm:text-sm">
                 Welcome back, {user?.name || 'Principal'}! Here's an overview of your{' '}
                 {user?.assignedCollegeIds && user.assignedCollegeIds.length > 0
                   ? `${user.assignedCollegeIds.length} assigned colleges`
@@ -400,9 +400,9 @@ const PrincipalHome = () => {
                 }.
               </p>
             </div>
-            <div className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-50 rounded-lg">
-              <AcademicCapIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-              <span className="text-xs sm:text-sm font-medium text-purple-700">
+            <div className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-light rounded-lg">
+              <AcademicCapIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              <span className="text-xs sm:text-sm font-medium text-primary">
                 {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
                   ? (user.assignedCollegeDetails.length > 1
                     ? `${user.assignedCollegeDetails.length} Colleges Assigned`
@@ -424,7 +424,7 @@ const PrincipalHome = () => {
             title="Total Students"
             value={stats.totalStudents}
             icon={UserGroupIcon}
-            color="bg-blue-500"
+            color="bg-primary"
             subtitle="Enrolled"
             clickable={true}
             onClick={() => handleStatClick('All')}

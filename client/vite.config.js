@@ -47,20 +47,20 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'Hostel Management System',
-        short_name: 'HMS',
+        name: 'Campo Hostel Management System',
+        short_name: 'Campo Hostel',
         description: 'Digital hostel management system',
-        theme_color: '#2563eb',
+        theme_color: '#167B72',
         start_url: '/',
         scope: '/',
         icons: [
           {
-            src: '/icon-192x192.png',
+            src: '/campo-logos/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/icon-512x512.png',
+            src: '/campo-logos/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
           },

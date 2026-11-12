@@ -337,15 +337,15 @@ const WardenHome = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 lg:p-6 mb-3 sm:mb-4 lg:mb-6"
+          className="bg-surface border border-border rounded-lg sm:rounded-xl shadow-sm p-3 sm:p-4 lg:p-6 mb-3 sm:mb-4 lg:mb-6"
         >
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4">
             <div>
-              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent flex items-center gap-2 sm:gap-3">
-                <UserGroupIcon className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-green-600 flex-shrink-0" />
+              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-primary flex items-center gap-2 sm:gap-3">
+                <UserGroupIcon className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6 text-primary flex-shrink-0" />
                 <span>Warden Dashboard</span>
               </h1>
-              <p className="text-xs sm:text-sm lg:text-base text-gray-600 mt-1 sm:mt-2">
+              <p className="text-xs sm:text-sm lg:text-base text-text-sub mt-1 sm:mt-2">
                 Welcome back! Here's an overview of hostel announcements and room availability.
               </p>
             </div>
@@ -354,7 +354,7 @@ const WardenHome = () => {
                 <select
                   value={academicYear}
                   onChange={(e) => setAcademicYear(e.target.value)}
-                  className="px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-xs sm:text-sm font-medium text-gray-700 bg-white"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary text-xs sm:text-sm font-medium text-text-main bg-surface"
                 >
                   {generateAcademicYears().map((year) => (
                     <option key={year} value={year}>
@@ -372,18 +372,18 @@ const WardenHome = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white rounded-lg sm:rounded-xl shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6"
+            className="bg-surface rounded-lg sm:rounded-xl shadow-sm border border-border p-3 sm:p-4 lg:p-6"
           >
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <UsersIcon className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-green-600" />
+                <UsersIcon className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-primary" />
               </div>
               <div className="ml-3 sm:ml-4 lg:ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="text-xs sm:text-sm font-medium text-gray-500 truncate">
+                  <dt className="text-xs sm:text-sm font-medium text-text-sub truncate">
                     Total Students
                   </dt>
-                  <dd className="text-base sm:text-lg lg:text-xl font-medium text-gray-900">
+                  <dd className="text-base sm:text-lg lg:text-xl font-medium text-text-main">
                     {stats.totalStudents}
                   </dd>
                 </dl>
@@ -395,7 +395,7 @@ const WardenHome = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-white rounded-lg sm:rounded-xl shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6"
+            className="bg-surface rounded-lg sm:rounded-xl shadow-sm border border-border p-3 sm:p-4 lg:p-6"
           >
             <div className="flex items-center">
               <div className="flex-shrink-0">

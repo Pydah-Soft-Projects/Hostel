@@ -1,21 +1,23 @@
-const CACHE_NAME = 'pydah-hostel-v1';
+const CACHE_NAME = 'campo-hostel-v3';
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/static/js/bundle.js',
-  '/static/css/main.css',
-  '/images/icon-192x192.png',
-  '/images/icon-512x512.png'
+  '/campo-logos/icon-192.png',
+  '/campo-logos/icon-512.png'
 ];
 
-// Install event - cache resources
+// Install event - cache resources safely
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
+      .then(async cache => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        await Promise.allSettled(
+          urlsToCache.map(url => cache.add(url).catch(err => {
+            console.warn('ServiceWorker: skipped resource', url, err);
+          }))
+        );
       })
   );
 });
@@ -51,9 +53,9 @@ self.addEventListener('activate', event => {
 // Handle push notifications
 self.addEventListener('push', event => {
   const options = {
-    body: event.data ? event.data.text() : 'New notification from Pydah Hostel Digital',
-    icon: '/images/icon-192x192.png',
-    badge: '/images/icon-72x72.png',
+    body: event.data ? event.data.text() : 'New notification from Campo Hostel Digital',
+    icon: '/campo-logos/icon-192.png',
+    badge: '/campo-logos/favicon-32x32.png',
     vibrate: [100, 50, 100],
     data: {
       dateOfArrival: Date.now(),
@@ -63,18 +65,18 @@ self.addEventListener('push', event => {
       {
         action: 'explore',
         title: 'View',
-        icon: '/images/icon-72x72.png'
+        icon: '/campo-logos/favicon-32x32.png'
       },
       {
         action: 'close',
         title: 'Close',
-        icon: '/images/icon-72x72.png'
+        icon: '/campo-logos/favicon-32x32.png'
       }
     ]
   };
 
   event.waitUntil(
-    self.registration.showNotification('Pydah Hostel Digital', options)
+    self.registration.showNotification('Campo Hostel Digital', options)
   );
 });
 

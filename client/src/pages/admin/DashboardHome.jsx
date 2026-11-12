@@ -207,12 +207,12 @@ const StatCard = ({ icon: Icon, label, value, color, extra, trend, trendValue, o
 // Module Section Component
 const ModuleSection = ({ title, icon: Icon, iconColor, children, className = '' }) => {
   return (
-    <div className={`bg-white rounded-lg sm:rounded-xl shadow-lg p-4 sm:p-6 ${className}`}>
-      <div className="flex items-center gap-2.5 sm:gap-3 mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-gray-200">
+    <div className={`bg-surface border border-border rounded-lg sm:rounded-xl shadow-md p-4 sm:p-6 ${className}`}>
+      <div className="flex items-center gap-2.5 sm:gap-3 mb-3 sm:mb-4 pb-3 sm:pb-4 border-b border-border">
         <div className={`p-2 sm:p-2 rounded-lg flex-shrink-0 ${iconColor}`}>
           <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
         </div>
-        <h2 className="text-base sm:text-xl font-bold text-gray-900 truncate">{title}</h2>
+        <h2 className="text-base sm:text-xl font-bold text-text-main truncate">{title}</h2>
       </div>
       {children}
     </div>
@@ -697,13 +697,13 @@ const DashboardHome = () => {
         {/* Header - Always visible */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
           <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-blue-900">Dashboard Overview</h1>
-            <p className="text-xs sm:text-sm text-gray-600 mt-1">Welcome back! Here's your system overview.</p>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary">Dashboard Overview</h1>
+            <p className="text-xs sm:text-sm text-text-sub mt-1">Welcome back! Here's your system overview.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-3 bg-white p-1.5 rounded-xl shadow-sm border border-gray-100 w-full sm:w-auto">
-            <div className="relative grid grid-cols-2 items-center bg-gray-200/80 p-1 rounded-xl w-64 sm:w-72 border border-gray-300/60 shadow-inner">
+          <div className="flex flex-wrap items-center gap-3 bg-surface p-1.5 rounded-xl shadow-sm border border-border w-full sm:w-auto">
+            <div className="relative grid grid-cols-2 items-center bg-background p-1 rounded-xl w-64 sm:w-72 border border-border shadow-inner">
               <motion.div
-                className="absolute top-1 bottom-1 bg-blue-600 rounded-lg shadow-md"
+                className="absolute top-1 bottom-1 bg-primary rounded-lg shadow-md"
                 initial={false}
                 animate={{
                   left: analyticsMode === 'live' ? '4px' : 'calc(50% + 2px)',
@@ -716,7 +716,7 @@ const DashboardHome = () => {
                 type="button"
                 onClick={() => setAnalyticsMode('live')}
                 className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
-                  analyticsMode === 'live' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                  analyticsMode === 'live' ? 'text-white' : 'text-text-sub hover:text-text-main'
                 }`}
               >
                 Live Analytics
@@ -726,7 +726,7 @@ const DashboardHome = () => {
                 type="button"
                 onClick={() => setAnalyticsMode('ay')}
                 className={`relative z-10 py-1.5 text-xs sm:text-sm font-medium text-center transition-colors duration-200 select-none ${
-                  analyticsMode === 'ay' ? 'text-white' : 'text-gray-700 hover:text-gray-900'
+                  analyticsMode === 'ay' ? 'text-white' : 'text-text-sub hover:text-text-main'
                 }`}
               >
                 AY Wise Analytics
@@ -737,10 +737,10 @@ const DashboardHome = () => {
               value={selectedAcademicYear}
               disabled={analyticsMode === 'live'}
               onChange={(e) => setSelectedAcademicYear(e.target.value)}
-              className={`px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${
+              className={`px-3 py-1.5 rounded-lg border text-xs sm:text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-primary shadow-sm ${
                 analyticsMode === 'live'
-                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
-                  : 'bg-white text-gray-800 border-gray-300 hover:border-gray-400 cursor-pointer'
+                  ? 'bg-gray-100 text-gray-400 border-border cursor-not-allowed opacity-60'
+                  : 'bg-surface text-text-main border-border hover:border-border-strong cursor-pointer'
               }`}
               title={analyticsMode === 'live' ? 'Switch to AY Wise Analytics to select academic year' : 'Select Academic Year'}
             >
@@ -755,7 +755,7 @@ const DashboardHome = () => {
 
         {/* Inline Content / Loading Area below Header */}
         {loading ? (
-          <div className="flex justify-center items-center h-64 bg-white/50 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex justify-center items-center h-64 bg-surface/50 rounded-xl shadow-sm border border-border">
             <LoadingSpinner size="lg" />
           </div>
         ) : (
