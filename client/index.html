@@ -26,6 +26,150 @@
     <meta name="msapplication-TileColor" content="#FFFFFF">
     <meta name="msapplication-TileImage" content="/images/icon-144x144.png">
     
+    <!-- Centralized Dynamic UI Theme Loader (Auto-detects Localhost 7001/7000 vs Production) -->
+    <link rel="stylesheet" id="pydah-theme-css" href="https://ui-theme.pydah.edu.in/themes/theme.css" />
+    <script>
+      (function() {
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        // Allow explicit override via ?theme_server=... or localStorage
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          const qServer = urlParams.get('theme_server');
+          if (qServer) localStorage.setItem('PYDAH_THEME_SERVER', qServer);
+        } catch (_) {}
+        
+        const savedServer = localStorage.getItem('PYDAH_THEME_SERVER');
+
+        // Candidate servers in priority order:
+        // When testing on localhost, prioritize http://localhost:7001 (Theme Editor) and http://localhost:7000 (Theme Server)
+        const candidates = [];
+        if (savedServer) candidates.push(savedServer);
+        if (isLocal) {
+          if (!candidates.includes('http://localhost:7001')) candidates.push('http://localhost:7001');
+          if (!candidates.includes('http://localhost:7000')) candidates.push('http://localhost:7000');
+        }
+        candidates.push('https://ui-theme.pydah.edu.in');
+
+        async function initTheme() {
+          let chosen = 'https://ui-theme.pydah.edu.in';
+          
+          if (isLocal || savedServer) {
+            for (const s of candidates) {
+              if (s === 'https://ui-theme.pydah.edu.in') {
+                chosen = s;
+                break;
+              }
+              try {
+                const ctrl = new AbortController();
+                const tid = setTimeout(() => ctrl.abort(), 1200);
+                // Check if server is responding
+                let res = await fetch(`${s}/themes/version.json?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
+                if (!res || !res.ok) {
+                  res = await fetch(`${s}/version.json?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
+                }
+                if (!res || !res.ok) {
+                  res = await fetch(`${s}/themes/theme.css?t=${Date.now()}`, { signal: ctrl.signal, mode: 'cors' }).catch(() => null);
+                }
+                clearTimeout(tid);
+                if (res && res.ok) {
+                  chosen = s;
+                  console.log(`🎨 [Theme] Connected to local Theme Server at ${chosen}`);
+                  break;
+                }
+              } catch (_) {}
+            }
+          }
+
+          console.log(`🎨 [Theme] Active Theme Server: ${chosen}`);
+          window.__ACTIVE_THEME_SERVER__ = chosen;
+
+          // Update theme stylesheet
+          const link = document.getElementById('pydah-theme-css');
+          if (link) {
+            link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
+            link.onerror = () => { link.href = `${chosen}/theme.css?v=${Date.now()}`; };
+          }
+
+          // Inject theme loader script with target theme server
+          const script = document.createElement('script');
+          script.id = 'pydah-theme-loader';
+          script.src = `${chosen}/themes/theme-loader.js`;
+          script.setAttribute('data-theme-server', chosen);
+          script.setAttribute('data-poll-interval', isLocal ? '5' : '30');
+          script.onerror = () => {
+            // Fallback to production loader SDK if local server doesn't host loader script
+            const fb = document.createElement('script');
+            fb.src = 'https://ui-theme.pydah.edu.in/themes/theme-loader.js';
+            fb.setAttribute('data-theme-server', chosen);
+            fb.setAttribute('data-poll-interval', isLocal ? '5' : '30');
+            document.head.appendChild(fb);
+          };
+          document.head.appendChild(script);
+
+          // Fast poll for Localhost Development
+          // When testing with Theme Editor on localhost:7001, poll every 3s to apply updates as soon as "Publish Theme" is clicked
+          if (isLocal && chosen.includes('localhost')) {
+            let lastVer = null;
+            let lastCss = '';
+
+            setInterval(async () => {
+              try {
+                // 1. Try polling version.json
+                let vRes = await fetch(`${chosen}/themes/version.json?t=${Date.now()}`).catch(() => null);
+                if (!vRes || !vRes.ok) {
+                  vRes = await fetch(`${chosen}/version.json?t=${Date.now()}`).catch(() => null);
+                }
+
+                if (vRes && vRes.ok) {
+                  const data = await vRes.json();
+                  const ver = data.version || data.hash || data.updatedAt || JSON.stringify(data);
+                  if (lastVer && lastVer !== ver) {
+                    console.log(`🎨 [Theme] Detected new theme published (${ver})! Applying...`);
+                    if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
+                    
+                    // Directly apply CSS variables to :root
+                    try {
+                      const cRes = await fetch(`${chosen}/themes/theme.css?v=${Date.now()}`);
+                      if (cRes.ok) {
+                        const txt = await cRes.text();
+                        const matches = txt.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g);
+                        for (const m of matches) {
+                          document.documentElement.style.setProperty(m[1].trim(), m[2].trim());
+                        }
+                      }
+                    } catch (_) {}
+
+                    window.dispatchEvent(new CustomEvent('theme:updated', { detail: data }));
+                  }
+                  lastVer = ver;
+                  return;
+                }
+
+                // 2. Fallback: check theme.css directly
+                const cssRes = await fetch(`${chosen}/themes/theme.css?t=${Date.now()}`).catch(() => null);
+                if (cssRes && cssRes.ok) {
+                  const txt = await cssRes.text();
+                  if (lastCss && lastCss !== txt) {
+                    console.log('🎨 [Theme] Detected theme.css change! Updating :root...');
+                    if (link) link.href = `${chosen}/themes/theme.css?v=${Date.now()}`;
+                    const matches = txt.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g);
+                    for (const m of matches) {
+                      document.documentElement.style.setProperty(m[1].trim(), m[2].trim());
+                    }
+                    window.dispatchEvent(new CustomEvent('theme:updated', { detail: { updated: true } }));
+                  }
+                  lastCss = txt;
+                }
+              } catch (_) {}
+            }, 3000);
+          }
+        }
+
+        initTheme();
+      })();
+    </script>
+    
     <!-- Safari polyfills and compatibility fixes -->
     <script>
       // Safari localStorage polyfill and compatibility fixes
