@@ -222,26 +222,19 @@ const PrincipalDashboard = () => {
         </button>
 
         {/* Header */}
-        <div className="p-4 flex-shrink-0">
-          <div className="bg-primary text-white p-3 rounded-xl shadow-lg flex items-center gap-2">
-            <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
-              <svg className="w-4 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h1 className="font-semibold text-xs">Campo Hostel</h1>
-              <p className="text-xs text-white/80 truncate">
-                {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
-                  ? (user.assignedCollegeDetails.length > 1
-                    ? `${user.assignedCollegeDetails.length} Colleges`
-                    : user.assignedCollegeDetails[0].name)
-                  : 'Principal Portal'}
-              </p>
-            </div>
-          </div>
+        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
+          <img
+            src="/campo-logos/campo_logo_transparent_hq.png"
+            alt="Campo Hostel"
+            className="h-8 w-auto object-contain object-left"
+          />
+          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
+            {user?.assignedCollegeDetails && user.assignedCollegeDetails.length > 0
+              ? (user.assignedCollegeDetails.length > 1
+                ? `${user.assignedCollegeDetails.length} Colleges`
+                : user.assignedCollegeDetails[0].name)
+              : 'Hostel · Principal Portal'}
+          </p>
         </div>
 
         {/* Navigation */}

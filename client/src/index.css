@@ -31,9 +31,26 @@
   --text-secondary: #486863;
   --text-muted: #7E9D97;
   --success: #1E824C;
+  --success-light: #dcfce7;
   --warning: #D9822B;
+  --warning-light: #fef3c7;
   --danger: #D13438;
+  --danger-light: #fee2e2;
   --info: #2B78C5;
+  --info-light: #e0f2fe;
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    font-family: 'Poppins', sans-serif;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+  }
 }
 
 /* Custom scrollbar styles */

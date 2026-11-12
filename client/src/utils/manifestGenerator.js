@@ -21,49 +21,13 @@ export const generateManifest = (settings) => {
     "author": pydahSoftInfo.companyName,
     "icons": [
       {
-        "src": "/images/icon-72x72.png",
-        "sizes": "72x72",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-96x96.png",
-        "sizes": "96x96",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-128x128.png",
-        "sizes": "128x128",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-144x144.png",
-        "sizes": "144x144",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-152x152.png",
-        "sizes": "152x152",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-192x192.png",
+        "src": "/campo-logos/icon-192.png",
         "sizes": "192x192",
         "type": "image/png",
         "purpose": "maskable any"
       },
       {
-        "src": "/images/icon-384x384.png",
-        "sizes": "384x384",
-        "type": "image/png",
-        "purpose": "maskable any"
-      },
-      {
-        "src": "/images/icon-512x512.png",
+        "src": "/campo-logos/icon-512.png",
         "sizes": "512x512",
         "type": "image/png",
         "purpose": "maskable any"
@@ -75,21 +39,21 @@ export const generateManifest = (settings) => {
         "short_name": "Dashboard",
         "description": "Access student dashboard",
         "url": "/student/dashboard",
-        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/campo-logos/icon-192.png", "sizes": "192x192" }]
       },
       {
         "name": "Leave Management",
         "short_name": "Leave",
         "description": "Apply for leave or permission",
         "url": "/student/leave",
-        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/campo-logos/icon-192.png", "sizes": "192x192" }]
       },
       {
         "name": "Complaints",
         "short_name": "Complaints",
         "description": "Raise hostel complaints",
         "url": "/student/complaints",
-        "icons": [{ "src": "/images/icon-192x192.png", "sizes": "192x192" }]
+        "icons": [{ "src": "/campo-logos/icon-192.png", "sizes": "192x192" }]
       }
     ],
     "related_applications": [

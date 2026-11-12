@@ -50,7 +50,7 @@ export const GlobalSettingsProvider = ({ children }) => {
       description: "Digital hostel management system for Campo Educational Institutions",
       keywords: "Campo Hostel, Hostel Management, Student Portal, Digital Hostel",
       author: "Campo Educational Institutions",
-      ogImage: "https://hms.pydahsoft.in/og-image.jpg"
+      ogImage: "https://hms.pydahsoft.in/campo-logos/og-image.png"
     },
     pydahsoft: {
       companyName: "PydahSoft",

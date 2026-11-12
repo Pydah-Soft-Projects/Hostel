@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import {
-  DevicePhoneMobileIcon,
   XMarkIcon,
   ArrowDownTrayIcon
 } from '@heroicons/react/24/outline';
@@ -74,7 +73,11 @@ const PWAInstallPrompt = () => {
             <div className="p-3 bg-primary text-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <DevicePhoneMobileIcon className="w-5 h-5 text-white" />
+                  <img
+                    src="/campo-logos/icon-192.png"
+                    alt="Campo Hostel"
+                    className="w-6 h-6 rounded-md object-contain"
+                  />
                   <h3 className="text-sm font-semibold text-white">
                     Install App
                   </h3>
@@ -106,9 +109,11 @@ const PWAInstallPrompt = () => {
           <div className="hidden sm:block p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
-                  <DevicePhoneMobileIcon className="w-6 h-6 text-white" />
-                </div>
+                <img
+                  src="/campo-logos/icon-192.png"
+                  alt="Campo Hostel"
+                  className="w-12 h-12 rounded-lg object-contain shadow-sm"
+                />
                 <div>
                   <h3 className="text-sm font-semibold text-text-main">
                     Install Campo Hostel Digital
