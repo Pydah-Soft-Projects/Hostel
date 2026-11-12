@@ -10,6 +10,38 @@ import {
   ShieldExclamationIcon,
   ChevronDownIcon
 } from '@heroicons/react/24/outline';
+import {
+  LayoutDashboard,
+  BedDouble,
+  Zap,
+  GraduationCap,
+  Users,
+  UserPlus,
+  Clock,
+  ShieldCheck,
+  FileSpreadsheet,
+  CalendarCheck,
+  Receipt,
+  CreditCard,
+  Layers,
+  FileText,
+  CalendarDays,
+  TicketCheck,
+  UserCheck,
+  Sliders,
+  BookOpen,
+  UserCog,
+  Search,
+  Megaphone,
+  Bell,
+  Vote,
+  Utensils,
+  Coffee,
+  SlidersHorizontal,
+  Settings,
+  Menu
+} from 'lucide-react';
+import CampoSidebar from '../../components/CampoSidebar';
 import { hasPermission, hasFullAccess, canPerformAction } from '../../utils/permissionUtils';
 import ComplaintList from './ComplaintList';
 import MemberManagement from './MemberManagement';
@@ -80,6 +112,13 @@ const AdminDashboard = () => {
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('campo_sidebar_collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('campo_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+  }, [isCollapsed]);
   const [notificationStates, setNotificationStates] = useState({
     complaint: false,
     announcement: false,
@@ -351,6 +390,239 @@ const AdminDashboard = () => {
     });
   }, [menuItems, isSuperAdmin]);
 
+  // Standardized Campo sections
+  const adminSections = useMemo(() => [
+    {
+      title: 'MAIN',
+      items: [
+        {
+          name: 'Dashboard',
+          icon: LayoutDashboard,
+          path: '/admin/dashboard',
+          show: isSuperAdmin || hasPermission(user, 'dashboard_home')
+        }
+      ]
+    },
+    {
+      title: 'MANAGEMENT',
+      items: [
+        {
+          name: 'Rooms',
+          icon: BedDouble,
+          path: '/admin/dashboard/rooms',
+          show: isSuperAdmin || hasPermission(user, 'room_management'),
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Room Management',
+              path: '/admin/dashboard/rooms/management',
+              icon: BedDouble
+            },
+            {
+              name: 'Electricity Bills',
+              path: '/admin/dashboard/rooms/electricity',
+              icon: Zap
+            }
+          ]
+        },
+        {
+          name: 'Student Portal',
+          icon: GraduationCap,
+          path: '/admin/dashboard/students',
+          show: isSuperAdmin || hasPermission(user, 'student_management'),
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Students',
+              path: '/admin/dashboard/students',
+              icon: Users
+            },
+            {
+              name: 'Add Student',
+              path: '/admin/dashboard/students/register-from-sql',
+              icon: UserPlus
+            },
+            {
+              name: 'Application Expiry Settings',
+              path: '/admin/dashboard/students/application-expiry-settings',
+              icon: Clock
+            },
+            {
+              name: 'NOC Management',
+              path: '/admin/dashboard/noc-management',
+              icon: ShieldCheck,
+              show: isSuperAdmin || hasPermission(user, 'noc_management')
+            },
+            {
+              name: 'Student Reports',
+              path: '/admin/dashboard/reports',
+              icon: FileSpreadsheet
+            }
+          ]
+        },
+        {
+          name: 'Staff / Guests',
+          icon: UserCheck,
+          path: '/admin/dashboard/staff-guests',
+          show: isSuperAdmin || hasPermission(user, 'staff_guests_management')
+        },
+        {
+          name: 'Cafeteria',
+          icon: Utensils,
+          path: '/admin/dashboard/cafeteria',
+          show: isSuperAdmin || hasPermission(user, 'menu_management'),
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Menu Management',
+              path: '/admin/dashboard/cafeteria/menu',
+              icon: Coffee
+            }
+          ]
+        }
+      ]
+    },
+    {
+      title: 'OPERATIONS',
+      items: [
+        {
+          name: 'Attendance',
+          icon: CalendarCheck,
+          path: '/admin/dashboard/attendance',
+          show: isSuperAdmin || hasPermission(user, 'attendance_management')
+        },
+        {
+          name: 'Leaves Tracker',
+          icon: CalendarDays,
+          path: '/admin/dashboard/leave',
+          show: isSuperAdmin || hasPermission(user, 'leave_management')
+        },
+        {
+          name: 'Ticket Management',
+          icon: TicketCheck,
+          path: '/admin/dashboard/complaints-members',
+          show: isSuperAdmin || hasPermission(user, 'maintenance_ticket_management'),
+          hasNotification: notificationStates.complaint,
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Complaints',
+              path: '/admin/dashboard/complaints',
+              icon: TicketCheck,
+              hasNotification: notificationStates.complaint
+            },
+            {
+              name: 'Members',
+              path: '/admin/dashboard/members',
+              icon: Users
+            }
+          ]
+        },
+        {
+          name: 'Fee Management',
+          icon: Receipt,
+          path: '/admin/dashboard/fee-management',
+          show: isSuperAdmin || hasPermission(user, 'fee_management'),
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Fee Management',
+              path: '/admin/dashboard/fee-management',
+              icon: CreditCard
+            },
+            {
+              name: 'Fee Structure',
+              path: '/admin/dashboard/fee-management/structure',
+              icon: Layers
+            },
+            {
+              name: 'Payment Records',
+              path: '/admin/dashboard/fee-management/payment-records',
+              icon: FileText
+            }
+          ]
+        },
+        {
+          name: 'Lost & Found',
+          icon: Search,
+          path: '/admin/dashboard/foundlost',
+          show: isSuperAdmin || hasPermission(user, 'found_lost_management')
+        },
+        {
+          name: 'Communication',
+          icon: Megaphone,
+          path: '/admin/dashboard/communication',
+          show: isSuperAdmin || hasPermission(user, 'announcement_management') || hasPermission(user, 'poll_management'),
+          hasNotification: notificationStates.announcement || notificationStates.poll,
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Announcements',
+              path: '/admin/dashboard/announcements',
+              icon: Bell,
+              hasNotification: notificationStates.announcement
+            },
+            {
+              name: 'Opinion Polls',
+              path: '/admin/dashboard/polls',
+              icon: Vote,
+              hasNotification: notificationStates.poll
+            }
+          ]
+        }
+      ]
+    },
+    {
+      title: 'ADMINISTRATION',
+      items: [
+        {
+          name: 'Campus Security',
+          icon: ShieldCheck,
+          path: '/admin/dashboard/security',
+          show: isSuperAdmin || hasPermission(user, 'security_management'),
+          hasSubmenu: true,
+          submenu: [
+            {
+              name: 'Security Dashboard',
+              path: '/admin/dashboard/security',
+              icon: ShieldCheck
+            },
+            {
+              name: 'Security Settings',
+              path: '/admin/dashboard/security/settings',
+              icon: Sliders,
+              show: isSuperAdmin || hasFullAccess(user, 'security_management')
+            }
+          ]
+        },
+        {
+          name: 'Course Management',
+          icon: BookOpen,
+          path: '/admin/dashboard/course-management',
+          show: isSuperAdmin || hasPermission(user, 'course_management')
+        },
+        {
+          name: 'User Management',
+          icon: UserCog,
+          path: '/admin/dashboard/admin-management',
+          show: isSuperAdmin
+        },
+        {
+          name: 'Student Controls',
+          icon: SlidersHorizontal,
+          path: '/admin/dashboard/feature-controls',
+          show: isSuperAdmin || hasPermission(user, 'feature_controls')
+        },
+        {
+          name: 'Global Settings',
+          icon: Settings,
+          path: '/admin/dashboard/global-settings',
+          show: isSuperAdmin
+        }
+      ]
+    }
+  ], [isSuperAdmin, user, notificationStates]);
+
   // Helper function to get first available section for sub-admins - memoized
   const getFirstAvailableSection = useCallback(() => {
     const availableSections = menuItems.filter(item => {
@@ -552,352 +824,33 @@ const AdminDashboard = () => {
     };
   }, [pathname, isSafari]);
 
-  // Initialize scroll indicators
-  useEffect(() => {
-    const nav = document.querySelector('nav.overflow-y-auto');
-    const bottomFade = document.getElementById('bottom-fade');
-
-    if (nav && bottomFade) {
-      // Check if content is scrollable
-      const isScrollable = nav.scrollHeight > nav.clientHeight;
-      bottomFade.style.opacity = isScrollable ? '1' : '0';
-    }
-  }, []);
-
   return (
-    <div className="h-screen flex bg-background">
+    <div className="min-h-screen flex bg-background">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-surface shadow-lg hover:bg-background transition-colors duration-200"
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 rounded-lg bg-surface shadow-md border hover:bg-background transition-colors"
+        style={{ borderColor: 'var(--border)' }}
+        aria-label="Open sidebar"
       >
-        <Bars3Icon className="w-6 h-6 text-gray-600" />
+        <Menu className="w-5 h-5 text-sidebar-muted" />
       </button>
 
-      {/* Mobile Sidebar Backdrop */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSidebarOpen(false)}
-            className="lg:hidden fixed inset-0 bg-black/50 z-40"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{
-          x: isSidebarOpen ? 0 : '-100%',
-        }}
-        transition={{ type: 'spring', damping: 20 }}
-        className="fixed lg:relative top-0 left-0 bottom-0 w-64 lg:w-56 xl:w-64 bg-sidebar text-sidebar-text border-r border-sidebar-muted/20 shadow-lg flex flex-col z-50 lg:translate-x-0 lg:!transform-none"
-      >
-        {/* Mobile Close Button */}
-        <button
-          onClick={() => setIsSidebarOpen(false)}
-          className="lg:hidden absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 text-sidebar-text transition-colors duration-200"
-        >
-          <XMarkIcon className="w-6 h-6" />
-        </button>
-
-        {/* Header */}
-        <div className="px-5 pt-5 pb-4 mb-2 border-b border-sidebar-muted/20 flex-shrink-0 pr-12 lg:pr-5">
-          <img
-            src="/campo-logos/campo_logo_transparent_hq.png"
-            alt="Campo Hostel"
-            className="h-8 w-auto object-contain object-left"
-          />
-          <p className="text-[11px] font-medium text-sidebar-muted mt-1.5 truncate">
-            Hostel · Admin Portal
-          </p>
-        </div>
-
-        {/* Navigation */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Top fade indicator */}
-          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
-            id="top-fade"></div>
-
-          <nav className="flex-1 px-4 space-y-2 overflow-y-auto min-h-0 scrollbar-sidebar"
-            onScroll={(e) => {
-              const target = e.target;
-              const topFade = document.getElementById('top-fade');
-              const bottomFade = document.getElementById('bottom-fade');
-
-              if (topFade && bottomFade) {
-                // Show top fade when scrolled down
-                topFade.style.opacity = target.scrollTop > 10 ? '1' : '0';
-
-                // Show bottom fade when not at bottom
-                const isAtBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 5;
-                bottomFade.style.opacity = isAtBottom ? '0' : '1';
-              }
-            }}>
-            {filteredMenuItems.map((item, index) => (
-              <motion.div
-                key={item.name}
-                initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                {item.hasSubmenu ? (
-                  // Submenu item
-                  <div>
-                    {(() => {
-                      const parentActive = pathname === item.path;
-                      const submenuActive = item.submenu?.some(sub =>
-                        pathname === sub.path || pathname.startsWith(`${sub.path}/`)
-                      );
-                      const parentClasses = parentActive
-                        ? "bg-primary text-white font-semibold shadow-md"
-                        : submenuActive
-                          ? "bg-white/10 text-sidebar-text font-medium"
-                          : "text-sidebar-text/80 hover:bg-white/10 hover:text-white";
-                      return (
-                        <button
-                          onClick={() => toggleSubmenu(item.name)}
-                          className={`relative overflow-hidden flex items-center justify-between w-full px-4 py-3 rounded-lg text-xs font-normal transition-all duration-300 ${parentClasses}`}
-                        >
-                      <div className="flex items-center gap-3 relative z-10">
-                        <svg
-                          className="w-4 h-4 lg:w-5 lg:h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d={item.icon}
-                          />
-                        </svg>
-                        <span>{item.name}</span>
-                      </div>
-                      <svg
-                        className={`w-4 h-4 transition-transform duration-200 relative z-10 ${expandedMenus[item.name] ? 'rotate-180' : ''
-                          }`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                          {/* Parent shimmer removed to avoid double shimmer with active child links */}
-                        </button>
-                      );
-                    })()}
-
-                    {/* Submenu items */}
-                    <AnimatePresence>
-                      {expandedMenus[item.name] && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="ml-6 mt-1 space-y-1"
-                        >
-                          {item.submenu.filter(subItem => subItem.show !== false).map((subItem, subIndex) => (
-                            <NavLink
-                              key={subItem.name}
-                              to={subItem.path}
-                              className={({ isActive }) =>
-                                `relative overflow-hidden flex items-center gap-3 px-4 py-2 rounded-lg text-xs font-normal transition-all duration-300 ${isActive
-                                  ? "bg-primary text-white font-semibold shadow-md"
-                                  : "text-sidebar-muted hover:bg-white/10 hover:text-white"
-                                }`
-                              }
-                            >
-                              <div className="relative">
-                                <svg
-                                  className="w-3 h-3 lg:w-4 lg:h-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="2"
-                                    d={subItem.icon}
-                                  />
-                                </svg>
-                                {subItem.notificationType && notificationStates[subItem.notificationType] && (
-                                  <motion.div
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                    className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
-                                  >
-                                    <motion.div
-                                      animate={{
-                                        scale: [1, 1.2, 1],
-                                        opacity: [1, 0.5, 1]
-                                      }}
-                                      transition={{
-                                        duration: 1.5,
-                                        repeat: Infinity,
-                                        ease: "easeInOut"
-                                      }}
-                                      className="w-full h-full bg-red-500 rounded-full"
-                                    />
-                                  </motion.div>
-                                )}
-                              </div>
-                              <span className="relative z-10">{subItem.name}</span>
-                              {pathname === subItem.path && (
-                                <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
-                              )}
-                            </NavLink>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ) : (
-                  // Regular item - normal NavLink
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      `relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-normal transition-all duration-300 ${isActive
-                        ? "bg-primary text-white font-semibold shadow-md"
-                        : "text-sidebar-text/80 hover:bg-white/10 hover:text-white"
-                      }`
-                    }
-                    end
-                  >
-                    <div className="relative">
-                      <svg
-                        className="w-4 h-4 lg:w-5 lg:h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d={item.icon}
-                        />
-                      </svg>
-                      {item.notificationType && notificationStates[item.notificationType] && (
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"
-                        >
-                          <motion.div
-                            animate={{
-                              scale: [1, 1.2, 1],
-                              opacity: [1, 0.5, 1]
-                            }}
-                            transition={{
-                              duration: 1.5,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                            className="w-full h-full bg-red-500 rounded-full"
-                          />
-                        </motion.div>
-                      )}
-                    </div>
-                    <span className="relative z-10">{item.name}</span>
-                    {pathname === item.path && (
-                      <span className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer pointer-events-none"></span>
-                    )}
-                  </NavLink>
-                )}
-              </motion.div>
-            ))}
-          </nav>
-
-          {/* Bottom fade indicator */}
-          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-sidebar to-transparent pointer-events-none z-10 opacity-0 transition-opacity duration-300"
-            id="bottom-fade"></div>
-        </div>
-
-        {/* User Profile and Logout */}
-        <div className="p-4 border-t border-sidebar-muted/20 flex-shrink-0">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-md text-sm lg:text-base">
-              {(user?.name || user?.username) ? (user?.name || user?.username).charAt(0).toUpperCase() : 'A'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs lg:text-sm font-semibold text-sidebar-text truncate">
-                {user?.name || user?.username || 'Admin'}
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-sidebar-muted truncate">
-                  {user?.role === 'super_admin' ? 'Super Admin'
-                    : user?.role === 'sub_admin' ? 'User'
-                    : user?.role === 'custom' ? (user?.customRole || 'Custom Role')
-                    : user?.role === 'warden' ? 'Warden'
-                    : user?.role === 'principal' ? 'Principal'
-                    : 'Admin'}
-                </div>
-                {/* Password Reset Icon - Show for sub-admins, principals, and super admin */}
-                {(user?.role === 'sub_admin' || user?.role === 'principal' || user?.role === 'super_admin') && (
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setShowResetPasswordModal(true)}
-                    className="p-1.5  hover:text-primary-light hover:bg-white/10 rounded-full transition-all duration-200"
-                    title="Reset Password"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                      />
-                    </svg>
-                  </motion.button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 lg:px-4 py-2 text-xs font-normal text-white bg-primary hover:bg-primary-hover rounded-lg transition-all duration-300 shadow hover:shadow-md"
-          >
-            <svg
-              className="w-3 h-3 lg:w-4 lg:h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-            Logout
-          </motion.button>
-        </div>
-      </motion.aside>
+      {/* Enterprise Campo Sidebar */}
+      <CampoSidebar
+        sections={adminSections}
+        moduleSubtitle="Hostel Management"
+        user={user}
+        onLogout={handleLogout}
+        onResetPassword={(user?.role === 'sub_admin' || user?.role === 'principal' || user?.role === 'super_admin') ? () => setShowResetPasswordModal(true) : null}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
+        isMobileOpen={isSidebarOpen}
+        setIsMobileOpen={setIsSidebarOpen}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto h-screen">
+      <main className={`flex-1 overflow-y-auto h-screen transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <div className="w-full p-4 lg:p-8">
           <div className="flex justify-end mb-4">
             <NotificationBell />

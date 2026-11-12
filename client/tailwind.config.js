@@ -8,6 +8,7 @@ export default {
       fontFamily: {
         sans: ['Poppins', 'sans-serif'],
         display: ['Space Grotesk', 'sans-serif'],
+        jakarta: ["'Plus Jakarta Sans'", 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
         deepsea: {
