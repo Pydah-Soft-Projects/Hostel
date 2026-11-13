@@ -6,7 +6,7 @@ import api from '../utils/axios';
 import { toast } from 'react-hot-toast';
 import notificationManager from '../utils/notificationManager';
 
-const NotificationBell = () => {
+const NotificationBell = ({ inline = false, className = '' }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -457,13 +457,16 @@ const NotificationBell = () => {
 
   return (
     <>
-      <div className="fixed top-4 right-4 z-50">
+      <div className={inline ? `relative flex-shrink-0 ${className}` : `fixed top-3.5 right-4 z-50 ${className}`}>
         <button
           onClick={() => {
             setIsOpen(!isOpen);
             setHasNewNotification(false);
           }}
-          className="relative p-2 text-text-sub hover:text-primary transition-colors duration-200 bg-surface rounded-full shadow-md hover:shadow-lg border border-border"
+          className={inline
+            ? "relative p-2 text-gray-500 hover:text-primary transition-colors duration-200 bg-white rounded-xl shadow-xs hover:shadow-md border border-gray-200/80 flex items-center justify-center h-[38px] w-[38px]"
+            : "relative p-2 text-text-sub hover:text-primary transition-colors duration-200 bg-surface rounded-full shadow-md hover:shadow-lg border border-border"
+          }
         >
           <motion.div
             animate={hasNewNotification ? {
@@ -476,10 +479,13 @@ const NotificationBell = () => {
               repeatDelay: 1
             }}
           >
-            <BellIcon className="h-6 w-6" />
+            <BellIcon className={inline ? "h-5 w-5" : "h-6 w-6"} />
           </motion.div>
           {unreadCount > 0 && (
-            <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-danger rounded-full">
+            <span className={inline
+              ? "absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold leading-none text-white bg-rose-600 rounded-full shadow-xs"
+              : "absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-danger rounded-full"
+            }>
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}
@@ -491,7 +497,7 @@ const NotificationBell = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
-              className="absolute right-0 mt-2 w-80 bg-surface rounded-lg shadow-lg border border-border"
+              className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden"
             >
               <div className="p-4">
                 <div className="flex justify-between items-center mb-4">

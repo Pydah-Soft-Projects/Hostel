@@ -25,6 +25,7 @@ import { toast } from 'react-hot-toast';
 import SEO from '../../components/SEO';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../utils/permissionUtils';
+import NotificationBell from '../../components/NotificationBell';
 
 // Normalize text for consistent grouping
 const normalizeText = (value) => (value || '').toString().trim().toUpperCase();
@@ -87,6 +88,177 @@ const ExecutiveKpiCard = ({ icon: Icon, label, value, subtext, badge, badgeColor
   );
 };
 
+// Comprehensive Skeleton Loading Component matching the exact dashboard grid
+const DashboardSkeleton = () => {
+  return (
+    <div className="space-y-5 sm:space-y-6 animate-pulse">
+      {/* KPI Cards Skeleton */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="bg-white rounded-xl border border-gray-200/80 p-4 sm:p-5 shadow-xs flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-gray-200" />
+              <div className="w-16 h-5 rounded-full bg-gray-100" />
+            </div>
+            <div>
+              <div className="w-24 h-8 bg-gray-200 rounded-md mb-2" />
+              <div className="w-36 h-4 bg-gray-200 rounded mb-1.5" />
+              <div className="w-48 h-3 bg-gray-100 rounded" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main Grid Skeleton */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
+        {/* Left Column (7 cols) */}
+        <div className="lg:col-span-7 space-y-5 sm:space-y-6">
+          {/* Occupancy Card Skeleton */}
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-gray-200" />
+                <div className="space-y-1">
+                  <div className="w-44 h-4 bg-gray-200 rounded" />
+                  <div className="w-32 h-3 bg-gray-100 rounded" />
+                </div>
+              </div>
+              <div className="w-24 h-4 bg-gray-100 rounded" />
+            </div>
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-2.5">
+                <div className="flex justify-between">
+                  <div className="w-32 h-3.5 bg-gray-200 rounded" />
+                  <div className="w-20 h-3.5 bg-gray-200 rounded" />
+                </div>
+                <div className="w-full bg-gray-200 h-2.5 rounded-full" />
+                <div className="flex justify-between pt-1">
+                  <div className="w-20 h-3 bg-gray-100 rounded" />
+                  <div className="w-20 h-3 bg-gray-100 rounded" />
+                  <div className="w-24 h-3 bg-gray-100 rounded" />
+                </div>
+              </div>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="h-9 bg-gray-50 border-b border-gray-200" />
+                {[1, 2, 3].map((r) => (
+                  <div key={r} className="h-12 border-b border-gray-100 px-4 flex items-center justify-between">
+                    <div className="w-28 h-4 bg-gray-200 rounded" />
+                    <div className="w-16 h-4 bg-gray-100 rounded" />
+                    <div className="w-20 h-4 bg-gray-200 rounded" />
+                    <div className="w-12 h-5 bg-gray-100 rounded-full" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Attendance Card Skeleton */}
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-gray-200" />
+                <div className="space-y-1">
+                  <div className="w-48 h-4 bg-gray-200 rounded" />
+                  <div className="w-36 h-3 bg-gray-100 rounded" />
+                </div>
+              </div>
+              <div className="w-24 h-4 bg-gray-100 rounded" />
+            </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map((p) => (
+                  <div key={p} className="bg-gray-50 rounded-lg p-2.5 text-center space-y-1.5 border border-gray-100">
+                    <div className="w-16 h-3 bg-gray-200 rounded mx-auto" />
+                    <div className="w-10 h-5 bg-gray-200 rounded mx-auto" />
+                  </div>
+                ))}
+              </div>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="h-9 bg-gray-50 border-b border-gray-200" />
+                {[1, 2, 3].map((r) => (
+                  <div key={r} className="h-12 border-b border-gray-100 px-4 flex items-center justify-between">
+                    <div className="w-28 h-4 bg-gray-200 rounded" />
+                    <div className="w-12 h-4 bg-gray-200 rounded" />
+                    <div className="w-24 h-4 bg-gray-100 rounded" />
+                    <div className="w-24 h-4 bg-gray-100 rounded" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column (5 cols) */}
+        <div className="lg:col-span-5 space-y-5 sm:space-y-6">
+          {/* Action Center Skeleton */}
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 sm:p-5">
+            <div className="flex items-center gap-2.5 mb-4 pb-3 border-b border-gray-100">
+              <div className="w-8 h-8 rounded-lg bg-gray-200" />
+              <div className="space-y-1">
+                <div className="w-36 h-4 bg-gray-200 rounded" />
+                <div className="w-28 h-3 bg-gray-100 rounded" />
+              </div>
+            </div>
+            <div className="space-y-3">
+              {[1, 2].map((b) => (
+                <div key={b} className="bg-gray-50 rounded-xl p-3.5 border border-gray-100 space-y-2.5">
+                  <div className="flex justify-between">
+                    <div className="w-28 h-3.5 bg-gray-200 rounded" />
+                    <div className="w-14 h-3 bg-gray-100 rounded" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[1, 2, 3].map((k) => (
+                      <div key={k} className="bg-white rounded-lg p-2 border border-gray-200 text-center space-y-1">
+                        <div className="w-8 h-5 bg-gray-200 rounded mx-auto" />
+                        <div className="w-12 h-2.5 bg-gray-100 rounded mx-auto" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Meal Schedule Skeleton */}
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-gray-200" />
+                <div className="w-36 h-4 bg-gray-200 rounded" />
+              </div>
+              <div className="w-16 h-4 bg-gray-100 rounded" />
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {[1, 2, 3, 4].map((m) => (
+                <div key={m} className="bg-gray-50 rounded-xl p-2.5 border border-gray-100 space-y-1.5">
+                  <div className="w-16 h-3.5 bg-gray-200 rounded" />
+                  <div className="w-full h-3 bg-gray-100 rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Launcher Skeleton */}
+          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-gray-100">
+              <div className="w-4 h-4 bg-gray-200 rounded" />
+              <div className="w-36 h-3.5 bg-gray-200 rounded" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[1, 2, 3, 4, 5, 6].map((q) => (
+                <div key={q} className="p-2.5 rounded-lg border border-gray-200 bg-gray-50 flex items-center gap-2">
+                  <div className="w-4 h-4 rounded bg-gray-200 flex-shrink-0" />
+                  <div className="w-20 h-3 bg-gray-200 rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Polished Module Section Container
 const ModuleSection = ({ title, subtitle, icon: Icon, iconColor = 'bg-primary text-white', rightAction, children, className = '' }) => {
   return (
@@ -110,14 +282,90 @@ const ModuleSection = ({ title, subtitle, icon: Icon, iconColor = 'bg-primary te
   );
 };
 
+const INITIAL_STATS = {
+  students: {
+    total: 0,
+    active: 0,
+    inactive: 0,
+    newThisWeek: 0,
+    byCourse: []
+  },
+  attendance: {
+    byCourseToday: {},
+    byCourseYesterday: {},
+    today: {
+      total: 0,
+      present: 0,
+      absent: 0,
+      percentage: 0,
+      fullyPresent: 0,
+      partiallyPresent: 0,
+      morningPresent: 0,
+      eveningPresent: 0,
+      nightPresent: 0,
+      byCourseToday: {},
+      byCourseYesterday: {}
+    },
+    trend: []
+  },
+  complaints: {
+    total: 0,
+    pending: 0,
+    active: 0,
+    resolved: 0,
+    inProgress: 0,
+    resolvedThisWeek: 0,
+    avgResolutionTime: 0
+  },
+  leaves: {
+    pending: 0,
+    approvedToday: 0,
+    rejectedToday: 0,
+    thisWeek: []
+  },
+  rooms: {
+    total: 0,
+    occupied: 0,
+    available: 0,
+    occupancyRate: 0,
+    byGender: [],
+    byHostel: []
+  },
+  communication: {
+    activeAnnouncements: 0,
+    activePolls: 0,
+    recentAnnouncements: [],
+    recentPolls: []
+  },
+  menu: {
+    todaysMenu: null,
+    hasMenu: false
+  }
+};
+
+// Global in-memory cache to retain dashboard state across tab/route navigations
+const dashboardMemoryCache = {
+  dataByMode: new Map(), // key -> stats object
+  newStudents: null,
+  joiningDates: null
+};
+
 const DashboardHome = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [analyticsMode, setAnalyticsMode] = useState('live'); // 'live' or 'ay'
   const currentYearNum = new Date().getFullYear();
   const [selectedAcademicYear, setSelectedAcademicYear] = useState(`${currentYearNum}-${currentYearNum + 1}`);
+
+  const cacheKey = `${analyticsMode}_${selectedAcademicYear}`;
+
+  const [stats, setStats] = useState(() => {
+    return dashboardMemoryCache.dataByMode.get(cacheKey) || INITIAL_STATS;
+  });
+  const [loading, setLoading] = useState(() => {
+    return !dashboardMemoryCache.dataByMode.has(cacheKey);
+  });
+  const [refreshing, setRefreshing] = useState(false);
 
   const ACADEMIC_YEARS = [
     `${currentYearNum}-${currentYearNum + 1}`,
@@ -128,17 +376,37 @@ const DashboardHome = () => {
   ];
 
   // States for Newly Admitted Students (last 15 days)
-  const [newStudents, setNewStudents] = useState([]);
-  const [loadingNewStudents, setLoadingNewStudents] = useState(false);
-  const [joiningDates, setJoiningDates] = useState({});
+  const [newStudents, setNewStudents] = useState(() => {
+    return dashboardMemoryCache.newStudents || [];
+  });
+  const [loadingNewStudents, setLoadingNewStudents] = useState(() => {
+    return !dashboardMemoryCache.newStudents;
+  });
+  const [joiningDates, setJoiningDates] = useState(() => {
+    return dashboardMemoryCache.joiningDates || {};
+  });
   const [savingJoiningDate, setSavingJoiningDate] = useState({});
 
-  const fetchRecentAdmissions = useCallback(async () => {
-    setLoadingNewStudents(true);
+  // Sync cache on cacheKey change (e.g. user toggles Live vs AY)
+  useEffect(() => {
+    const cached = dashboardMemoryCache.dataByMode.get(cacheKey);
+    if (cached) {
+      setStats(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  }, [cacheKey]);
+
+  const fetchRecentAdmissions = useCallback(async (force = false) => {
+    if (!dashboardMemoryCache.newStudents || force) {
+      setLoadingNewStudents(true);
+    }
     try {
       const res = await api.get('/api/admin/students/recent-admissions?days=15');
       if (res.data?.success && Array.isArray(res.data.data)) {
         setNewStudents(res.data.data);
+        dashboardMemoryCache.newStudents = res.data.data;
         const initialDates = {};
         res.data.data.forEach(s => {
           if (s.joiningDate) {
@@ -146,6 +414,7 @@ const DashboardHome = () => {
           }
         });
         setJoiningDates(initialDates);
+        dashboardMemoryCache.joiningDates = initialDates;
       }
     } catch (error) {
       console.error('Error fetching recent admissions:', error);
@@ -171,7 +440,11 @@ const DashboardHome = () => {
         joiningDate: dateVal
       });
       toast.success('Hostel joining date saved successfully');
-      setNewStudents(prev => prev.map(s => s._id === studentId ? { ...s, joiningDate: dateVal } : s));
+      setNewStudents(prev => {
+        const next = prev.map(s => s._id === studentId ? { ...s, joiningDate: dateVal } : s);
+        dashboardMemoryCache.newStudents = next;
+        return next;
+      });
     } catch (error) {
       console.error('Error saving joining date:', error);
       toast.error(error.response?.data?.message || 'Failed to save hostel joining date');
@@ -200,74 +473,15 @@ const DashboardHome = () => {
   }, [isSuperAdmin, canViewStudents, canViewAttendance, canViewComplaints,
     canViewLeaves, canViewMenu, canViewRooms, canViewCommunication]);
 
-  // Operational State
-  const [stats, setStats] = useState({
-    students: {
-      total: 0,
-      active: 0,
-      inactive: 0,
-      newThisWeek: 0,
-      byCourse: []
-    },
-    attendance: {
-      byCourseToday: {},
-      byCourseYesterday: {},
-      today: {
-        total: 0,
-        present: 0,
-        absent: 0,
-        percentage: 0,
-        fullyPresent: 0,
-        partiallyPresent: 0,
-        morningPresent: 0,
-        eveningPresent: 0,
-        nightPresent: 0,
-        byCourseToday: {},
-        byCourseYesterday: {}
-      },
-      trend: []
-    },
-    complaints: {
-      total: 0,
-      pending: 0,
-      active: 0,
-      resolved: 0,
-      inProgress: 0,
-      resolvedThisWeek: 0,
-      avgResolutionTime: 0
-    },
-    leaves: {
-      pending: 0,
-      approvedToday: 0,
-      rejectedToday: 0,
-      thisWeek: []
-    },
-    rooms: {
-      total: 0,
-      occupied: 0,
-      available: 0,
-      occupancyRate: 0,
-      byGender: [],
-      byHostel: []
-    },
-    communication: {
-      activeAnnouncements: 0,
-      activePolls: 0,
-      recentAnnouncements: [],
-      recentPolls: []
-    },
-    menu: {
-      todaysMenu: null,
-      hasMenu: false
-    }
-  });
-
-  const isInitialMount = React.useRef(true);
-
   // Fetch all dashboard data
   const fetchDashboardData = useCallback(async (isManualRefresh = false) => {
-    if (isManualRefresh) setRefreshing(true);
-    else setLoading(true);
+    const hasCachedData = dashboardMemoryCache.dataByMode.has(cacheKey);
+
+    if (isManualRefresh) {
+      setRefreshing(true);
+    } else if (!hasCachedData) {
+      setLoading(true);
+    }
 
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -275,18 +489,20 @@ const DashboardHome = () => {
         ? `/api/admin/dashboard-summary?academicYear=${selectedAcademicYear}`
         : '/api/admin/dashboard-summary';
 
+      let updated = { ...(dashboardMemoryCache.dataByMode.get(cacheKey) || INITIAL_STATS) };
+
       // Primary summary
       const summaryRes = await api.get(summaryEndpoint).catch(() => null);
       if (summaryRes?.data?.success) {
         const sData = summaryRes.data.data;
-        setStats(prev => ({
-          ...prev,
-          students: sData.students || prev.students,
-          complaints: sData.complaints || prev.complaints,
-          leaves: sData.leaves || prev.leaves,
-          rooms: sData.rooms || prev.rooms,
-          communication: sData.communication || prev.communication
-        }));
+        updated = {
+          ...updated,
+          students: sData.students || updated.students,
+          complaints: sData.complaints || updated.complaints,
+          leaves: sData.leaves || updated.leaves,
+          rooms: sData.rooms || updated.rooms,
+          communication: sData.communication || updated.communication
+        };
       }
 
       // Room stats
@@ -298,19 +514,19 @@ const DashboardHome = () => {
         if (roomStatsRes?.data?.success) {
           const roomData = roomStatsRes.data.data;
           const overall = roomData.overall || {};
-          setStats(prev => ({
-            ...prev,
+          updated = {
+            ...updated,
             rooms: {
-              ...prev.rooms,
-              total: overall.totalRooms ?? prev.rooms.total,
-              occupied: overall.filledBeds ?? prev.rooms.occupied,
-              available: overall.availableBeds ?? prev.rooms.available,
+              ...updated.rooms,
+              total: overall.totalRooms ?? updated.rooms.total,
+              occupied: overall.filledBeds ?? updated.rooms.occupied,
+              available: overall.availableBeds ?? updated.rooms.available,
               occupancyRate: overall.totalBeds > 0
                 ? Math.round((overall.filledBeds / overall.totalBeds) * 100)
                 : 0,
               byHostel: roomData.byHostel || []
             }
-          }));
+          };
         }
       }
 
@@ -327,60 +543,60 @@ const DashboardHome = () => {
           api.get(`/api/attendance/date?date=${yesterday}${academicYearParam}`).catch(() => null)
         ]);
 
-        setStats(prev => ({
-          ...prev,
+        updated = {
+          ...updated,
           attendance: {
-            ...prev.attendance,
+            ...updated.attendance,
             byCourseToday: todayAttendanceRes?.data?.success
               ? summarizeAttendanceByCourse(todayAttendanceRes.data.data.attendance)
-              : prev.attendance.byCourseToday,
+              : updated.attendance.byCourseToday,
             byCourseYesterday: yesterdayAttendanceRes?.data?.success
               ? summarizeAttendanceByCourse(yesterdayAttendanceRes.data.data.attendance)
-              : prev.attendance.byCourseYesterday
+              : updated.attendance.byCourseYesterday
           }
-        }));
+        };
       }
 
       // Fetch static attendance statistics & cafeteria menu
-      if (isInitialMount.current || isManualRefresh) {
-        isInitialMount.current = false;
-        const [attendanceStatsRes, todaysMenuRes] = await Promise.allSettled([
-          api.get(`/api/attendance/stats?date=${today}`),
-          api.get('/api/cafeteria/menu/today')
-        ]);
+      const [attendanceStatsRes, todaysMenuRes] = await Promise.allSettled([
+        api.get(`/api/attendance/stats?date=${today}`),
+        api.get('/api/cafeteria/menu/today')
+      ]);
 
-        if (attendanceStatsRes.status === 'fulfilled' && attendanceStatsRes.value?.data?.success) {
-          const attendanceData = attendanceStatsRes.value.data.data.statistics || {};
-          setStats(prev => ({
-            ...prev,
-            attendance: {
-              ...prev.attendance,
-              today: {
-                total: attendanceData.totalStudents || 0,
-                present: attendanceData.fullyPresent || 0,
-                absent: attendanceData.absent || 0,
-                percentage: attendanceData.percentages?.fullyPresentPercentage || 0,
-                fullyPresent: attendanceData.fullyPresent || 0,
-                partiallyPresent: attendanceData.partiallyPresent || 0,
-                morningPresent: attendanceData.morningPresent || 0,
-                eveningPresent: attendanceData.eveningPresent || 0,
-                nightPresent: attendanceData.nightPresent || 0
-              }
+      if (attendanceStatsRes.status === 'fulfilled' && attendanceStatsRes.value?.data?.success) {
+        const attendanceData = attendanceStatsRes.value.data.data.statistics || {};
+        updated = {
+          ...updated,
+          attendance: {
+            ...updated.attendance,
+            today: {
+              total: attendanceData.totalStudents || 0,
+              present: attendanceData.fullyPresent || 0,
+              absent: attendanceData.absent || 0,
+              percentage: attendanceData.percentages?.fullyPresentPercentage || 0,
+              fullyPresent: attendanceData.fullyPresent || 0,
+              partiallyPresent: attendanceData.partiallyPresent || 0,
+              morningPresent: attendanceData.morningPresent || 0,
+              eveningPresent: attendanceData.eveningPresent || 0,
+              nightPresent: attendanceData.nightPresent || 0
             }
-          }));
-        }
-
-        if (todaysMenuRes.status === 'fulfilled' && todaysMenuRes.value?.data?.success) {
-          const menuData = todaysMenuRes.value.data.data;
-          setStats(prev => ({
-            ...prev,
-            menu: {
-              todaysMenu: menuData,
-              hasMenu: !!menuData && !!menuData.meals
-            }
-          }));
-        }
+          }
+        };
       }
+
+      if (todaysMenuRes.status === 'fulfilled' && todaysMenuRes.value?.data?.success) {
+        const menuData = todaysMenuRes.value.data.data;
+        updated = {
+          ...updated,
+          menu: {
+            todaysMenu: menuData,
+            hasMenu: !!menuData && !!menuData.meals
+          }
+        };
+      }
+
+      setStats(updated);
+      dashboardMemoryCache.dataByMode.set(cacheKey, updated);
 
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -389,7 +605,7 @@ const DashboardHome = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [analyticsMode, selectedAcademicYear, canViewRooms, canViewAttendance]);
+  }, [cacheKey, analyticsMode, selectedAcademicYear, canViewRooms, canViewAttendance]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -437,29 +653,30 @@ const DashboardHome = () => {
         keywords="Admin Dashboard, Hostel Management, Statistics, Analytics"
       />
 
-      <div className="mx-auto mt-8 sm:mt-0 space-y-5 sm:space-y-6 pb-8">
+      <div className="mx-auto space-y-4 sm:space-y-5 pb-8">
 
         {/* =========================================================================
-            HEADER COMMAND BAR (Title, Mode Toggle, AY Selector & Refresh)
+            HEADER COMMAND BAR (Title, Date Context, Mode Toggle, AY & Bell)
         ========================================================================= */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 sm:p-5 rounded-xl border border-gray-200/80 shadow-xs">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3.5 pb-0.5">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-gray-900 tracking-tight">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
                 Dashboard Overview
               </h1>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Live Operations
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-200/70">
+                <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
+                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-gray-500 font-medium mt-0.5">
+            <p className="text-xs sm:text-sm text-gray-500 font-medium mt-1">
               Hostel capacity, resident attendance, and campus service governance
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full lg:w-auto">
             {/* Live vs AY Mode Pill */}
-            <div className="relative grid grid-cols-2 items-center bg-gray-100 p-1 rounded-xl w-60 sm:w-64 border border-gray-200/60 shadow-inner">
+            <div className="relative grid grid-cols-2 items-center bg-white p-1 rounded-xl w-56 sm:w-60 border border-gray-200/80 shadow-xs">
               <motion.div
                 className="absolute top-1 bottom-1 bg-primary rounded-lg shadow-sm"
                 initial={false}
@@ -496,10 +713,10 @@ const DashboardHome = () => {
               value={selectedAcademicYear}
               disabled={analyticsMode === 'live'}
               onChange={(e) => setSelectedAcademicYear(e.target.value)}
-              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-primary shadow-xs ${
+              className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-primary shadow-xs h-[38px] ${
                 analyticsMode === 'live'
                   ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
-                  : 'bg-white text-gray-800 border-gray-300 hover:border-gray-400 cursor-pointer'
+                  : 'bg-white text-gray-800 border-gray-200/80 hover:border-gray-300 cursor-pointer'
               }`}
               title={analyticsMode === 'live' ? 'Switch to AY Wise to select academic year' : 'Select Academic Year'}
             >
@@ -513,21 +730,25 @@ const DashboardHome = () => {
             {/* Manual Sync / Refresh Button */}
             <button
               type="button"
-              onClick={() => fetchDashboardData(true)}
+              onClick={() => {
+                fetchDashboardData(true);
+                fetchRecentAdmissions(true);
+              }}
               disabled={refreshing}
-              className="p-2 text-gray-500 hover:text-primary hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shadow-2xs"
+              className="p-2 text-gray-500 hover:text-primary hover:bg-gray-50 rounded-xl bg-white border border-gray-200/80 transition-colors shadow-xs h-[38px] w-[38px] flex items-center justify-center flex-shrink-0"
               title="Refresh Dashboard Data"
             >
               <ArrowPathIcon className={`w-4 h-4 ${refreshing ? 'animate-spin text-primary' : ''}`} />
             </button>
+
+            {/* Integrated Notification Bell */}
+            <NotificationBell inline />
           </div>
         </div>
 
-        {/* Inline Loading Indicator */}
+        {/* Inline Loading / Skeleton State */}
         {loading ? (
-          <div className="flex justify-center items-center h-64 bg-white rounded-xl shadow-xs border border-gray-200">
-            <LoadingSpinner size="lg" />
-          </div>
+          <DashboardSkeleton />
         ) : (
           <>
             {/* =========================================================================
@@ -1035,8 +1256,22 @@ const DashboardHome = () => {
               }
             >
               {loadingNewStudents ? (
-                <div className="flex justify-center py-8">
-                  <LoadingSpinner size="md" />
+                <div className="space-y-2.5 animate-pulse">
+                  {[1, 2, 3].map(n => (
+                    <div key={n} className="p-3.5 bg-white rounded-xl border border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-2 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-32 h-4 bg-gray-200 rounded" />
+                          <div className="w-16 h-3.5 bg-gray-100 rounded" />
+                        </div>
+                        <div className="w-48 h-3 bg-gray-100 rounded" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-28 h-8 bg-gray-100 rounded-lg" />
+                        <div className="w-32 h-8 bg-gray-200 rounded-lg" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : newStudents.length === 0 ? (
                 <div className="text-center py-8 px-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50">

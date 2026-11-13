@@ -851,10 +851,10 @@ const AdminDashboard = () => {
 
       {/* Main Content */}
       <main className={`flex-1 overflow-y-auto h-screen transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
-        <div className="w-full p-4 lg:p-8">
-          <div className="flex justify-end mb-4">
+        <div className="w-full px-4 lg:px-6 pt-3.5 pb-8">
+          {pathname !== '/admin/dashboard' && pathname !== '/admin/dashboard/' && (
             <NotificationBell />
-          </div>
+          )}
           <Outlet />
         </div>
       </main>
