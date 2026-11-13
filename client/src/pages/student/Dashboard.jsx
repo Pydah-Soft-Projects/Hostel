@@ -158,6 +158,7 @@ const navItems = [
 const StudentDashboardLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isFeatureEnabled, loading: featureLoading, featureToggles } = useFeatureToggles();
   const [metrics, setMetrics] = useState({
     totalComplaints: 0,
@@ -170,10 +171,26 @@ const StudentDashboardLayout = () => {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem('campo_sidebar_collapsed') === 'true';
   });
+  const [unvotedPolls, setUnvotedPolls] = useState([]);
+  const [currentPollIndex, setCurrentPollIndex] = useState(0);
+  const [complaintsAwaitingFeedback, setComplaintsAwaitingFeedback] = useState([]);
+  const [currentFeedbackIndex, setCurrentFeedbackIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [notificationStates, setNotificationStates] = useState({
+    complaint: false,
+    announcement: false,
+    poll: false,
+    fee_reminder: false
+  });
 
   useEffect(() => {
     localStorage.setItem('campo_sidebar_collapsed', isCollapsed ? 'true' : 'false');
   }, [isCollapsed]);
+
+  // Close sidebar when route changes
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location]);
 
   const studentSections = [
     {
@@ -279,22 +296,6 @@ const StudentDashboardLayout = () => {
       ]
     }
   ];
-  const [unvotedPolls, setUnvotedPolls] = useState([]);
-  const [currentPollIndex, setCurrentPollIndex] = useState(0);
-  const [complaintsAwaitingFeedback, setComplaintsAwaitingFeedback] = useState([]);
-  const [currentFeedbackIndex, setCurrentFeedbackIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [notificationStates, setNotificationStates] = useState({
-    complaint: false,
-    announcement: false,
-    poll: false
-  });
-
-  // Close sidebar when route changes
-  const location = useLocation();
-  useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [location]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -322,7 +323,8 @@ const StudentDashboardLayout = () => {
           setNotificationStates({
             complaint: notifications.some(n => n.type === 'complaint'),
             announcement: notifications.some(n => n.type === 'announcement'),
-            poll: notifications.some(n => n.type === 'poll')
+            poll: notifications.some(n => n.type === 'poll'),
+            fee_reminder: notifications.some(n => n.type === 'fee_reminder')
           });
         }
 
